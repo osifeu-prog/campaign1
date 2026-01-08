@@ -3,6 +3,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler
 import os
 import asyncio
+import threading
 import bot_handlers
 
 # Load environment variables
@@ -16,20 +17,25 @@ application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 # Register handlers
 application.add_handler(CommandHandler("start", bot_handlers.start))
 
-# Initialize PTB once at startup
-async def init_bot():
-    await application.initialize()
-    await application.start()
+# Create a dedicated event loop for PTB
+ptb_loop = asyncio.new_event_loop()
 
-asyncio.get_event_loop().run_until_complete(init_bot())
+def run_ptb():
+    asyncio.set_event_loop(ptb_loop)
+    ptb_loop.run_until_complete(application.initialize())
+    ptb_loop.run_until_complete(application.start())
+    ptb_loop.run_forever()
+
+# Start PTB in a separate thread
+threading.Thread(target=run_ptb, daemon=True).start()
 
 @app.post("/webhook")
 def webhook():
     data = request.get_json(force=True)
     update = Update.de_json(data, application.bot)
 
-    # Process update asynchronously
-    asyncio.get_event_loop().run_until_complete(application.process_update(update))
+    # Schedule update processing on PTB loop
+    asyncio.run_coroutine_threadsafe(application.process_update(update), ptb_loop)
 
     return "OK", 200
 
