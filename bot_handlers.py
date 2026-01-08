@@ -15,8 +15,15 @@ from telegram.ext import (
 )
 import sheets_service
 
+# ------------------ ENV / CONFIG ------------------
+
 LOG_GROUP_ID = os.getenv("LOG_GROUP_ID", "")
 ADMIN_IDS = [i for i in os.getenv("ADMIN_IDS", "").split(",") if i]
+
+ALL_MEMBERS_GROUP_ID = os.getenv("ALL_MEMBERS_GROUP_ID", "")
+ACTIVISTS_GROUP_ID = os.getenv("ACTIVISTS_GROUP_ID", "")
+EXPERTS_GROUP_ID = os.getenv("EXPERTS_GROUP_ID", "")
+SUPPORT_GROUP_ID = os.getenv("SUPPORT_GROUP_ID", "")
 
 (
     CHOOSING_ROLE,
@@ -253,7 +260,7 @@ async def expert_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
         await query.edit_message_text("נדחה.")
 
 
-async def _notify_expert(context, user_id, approved):
+async def _notify_expert(context: ContextTypes.DEFAULT_TYPE, user_id: str, approved: bool):
     text = "המועמדות שלך אושרה." if approved else "המועמדות שלך נדחתה."
     await context.bot.send_message(chat_id=int(user_id), text=text)
 
@@ -303,14 +310,49 @@ async def assign_position(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("בוצע.")
 
 
-# ------------------ ID HELPERS ------------------
+# ------------------ SUPPORT / ID HELPERS ------------------
 
 async def my_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(f"Your ID:\n`{update.effective_user.id}`", parse_mode="Markdown")
+    await update.message.reply_text(
+        f"Your ID:\n`{update.effective_user.id}`",
+        parse_mode="Markdown",
+    )
 
 
 async def group_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(f"Group ID:\n`{update.effective_chat.id}`", parse_mode="Markdown")
+    await update.message.reply_text(
+        f"Group ID:\n`{update.effective_chat.id}`",
+        parse_mode="Markdown",
+    )
+
+
+async def support(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /support <טקסט חופשי>
+    שולח את הפנייה לקבוצת התמיכה (SUPPORT_GROUP_ID), אם מוגדרת.
+    """
+    if not SUPPORT_GROUP_ID:
+        await update.message.reply_text("קבוצת התמיכה לא מוגדרת במערכת.")
+        return
+
+    text = update.message.text.replace("/support", "", 1).strip()
+    if not text:
+        await update.message.reply_text("כתוב את הפנייה שלך אחרי /support")
+        return
+
+    user = update.effective_user
+    await context.bot.send_message(
+        chat_id=int(SUPPORT_GROUP_ID),
+        text=(
+            "פנייה חדשה מהבוט:\n"
+            f"User ID: {user.id}\n"
+            f"Username: @{user.username if user.username else 'ללא'}\n"
+            f"שם: {user.full_name}\n\n"
+            f"תוכן הפנייה:\n{text}"
+        ),
+    )
+
+    await update.message.reply_text("הפנייה נשלחה. תודה.")
 
 
 async def all_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -322,6 +364,7 @@ async def all_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/positions – רשימת מקומות\n"
         "/position <מספר> – פרטי מקום\n"
         "/assign <מקום> <user_id> – שיוך מקום (אדמין)\n"
+        "/support <טקסט> – שליחת פנייה לצוות התמיכה\n"
         "/ALL – רשימת כל הפקודות\n"
     )
     await update.message.reply_text(text)
@@ -341,15 +384,33 @@ def get_conversation_handler():
             CHOOSING_ROLE: [
                 CallbackQueryHandler(choose_role, pattern="^(supporter|expert)$")
             ],
-            SUPPORTER_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_name)],
-            SUPPORTER_CITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_city)],
-            SUPPORTER_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_email)],
-            EXPERT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, expert_name)],
-            EXPERT_FIELD: [MessageHandler(filters.TEXT & ~filters.COMMAND, expert_field)],
-            EXPERT_EXPERIENCE: [MessageHandler(filters.TEXT & ~filters.COMMAND, expert_experience)],
-            EXPERT_POSITION: [MessageHandler(filters.TEXT & ~filters.COMMAND, expert_position)],
-            EXPERT_LINKS: [MessageHandler(filters.TEXT & ~filters.COMMAND, expert_links)],
-            EXPERT_WHY: [MessageHandler(filters.TEXT & ~filters.COMMAND, expert_why)],
+            SUPPORTER_NAME: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_name)
+            ],
+            SUPPORTER_CITY: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_city)
+            ],
+            SUPPORTER_EMAIL: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_email)
+            ],
+            EXPERT_NAME: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, expert_name)
+            ],
+            EXPERT_FIELD: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, expert_field)
+            ],
+            EXPERT_EXPERIENCE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, expert_experience)
+            ],
+            EXPERT_POSITION: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, expert_position)
+            ],
+            EXPERT_LINKS: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, expert_links)
+            ],
+            EXPERT_WHY: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, expert_why)
+            ],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
         per_message=False,
