@@ -51,6 +51,10 @@ def append_user_row(data: Dict):
 
 
 def append_expert_row(data: Dict):
+    """
+    מומלץ שגליון Experts יכלול כותרות:
+    user_id | full_name | field | experience | position | links | why | created_at | status
+    """
     values = [
         str(data.get("user_id", "")),
         str(data.get("expert_full_name", "")),
@@ -60,17 +64,48 @@ def append_expert_row(data: Dict):
         str(data.get("expert_links", "")),
         str(data.get("expert_why", "")),
         str(data.get("created_at", "")),
+        "pending",  # סטטוס התחלתי
     ]
     _append_row(EXPERTS_SHEET_NAME, values)
 
 
-# ------------------ POSITIONS ------------------
+# ------------------ EXPERT STATUS ------------------
+
+def update_expert_status(user_id: str, new_status: str):
+    """
+    מעדכן את שדה ה-status של מומחה בגיליון Experts.
+    מחפש לפי user_id בעמודה הראשונה.
+    """
+    service = _get_sheets_service()
+    range_name = f"{EXPERTS_SHEET_NAME}!A:I"
+
+    result = service.spreadsheets().values().get(
+        spreadsheetId=SPREADSHEET_ID,
+        range=range_name
+    ).execute()
+
+    rows = result.get("values", [])
+    if not rows:
+        return
+
+    # חיפוש השורה של המומחה
+    for idx, row in enumerate(rows[1:], start=2):  # החל משורה 2 (אחרי header)
+        if len(row) > 0 and row[0] == str(user_id):
+            # עמודת status היא I (9)
+            status_range = f"{EXPERTS_SHEET_NAME}!I{idx}:I{idx}"
+            body = {"values": [[new_status]]}
+            service.spreadsheets().values().update(
+                spreadsheetId=SPREADSHEET_ID,
+                range=status_range,
+                valueInputOption="RAW",
+                body=body,
+            ).execute()
+            break
+
+
+# ------------------ POSITIONS (כמו שכבר בנינו) ------------------
 
 def init_positions():
-    """
-    מוודא שטבלת Positions קיימת ומכילה 121 שורות (1–121).
-    אם ריקה/חסרה – יוצר כותרות + 121 שורות עם ערכי ברירת מחדל.
-    """
     service = _get_sheets_service()
     range_name = f"{POSITIONS_SHEET_NAME}!A:E"
 
@@ -81,15 +116,14 @@ def init_positions():
 
     rows = result.get("values", [])
 
-    # אם אין כותרות או פחות מ-2 שורות – נבנה מחדש
     if len(rows) < 2:
         header = ["position_id", "title", "description", "expert_user_id", "assigned_at"]
         data_rows = []
         for i in range(1, 122):
             data_rows.append([
                 str(i),
-                f"Position {i}",          # TODO: אפשר לערוך בגיליון לשמות אמיתיים
-                "",                       # description – אפשר לערוך ידנית
+                f"Position {i}",  # TODO: עדכן שמות אמיתיים בגיליון
+                "",
                 "",
                 "",
             ])
@@ -116,7 +150,7 @@ def get_positions():
     if not rows:
         return positions
 
-    for row in rows[1:]:  # skip header
+    for row in rows[1:]:
         positions.append({
             "position_id": row[0] if len(row) > 0 else "",
             "title": row[1] if len(row) > 1 else "",
@@ -143,16 +177,11 @@ def position_is_free(position_id: str) -> bool:
 
 
 def assign_position(position_id: str, user_id: str, timestamp: str):
-    """
-    משייך מקום למומחה (user_id).
-    מניח שהמקום קיים ו/או פנוי – בדיקה נעשית בבוט.
-    """
     service = _get_sheets_service()
 
     positions = get_positions()
     row_index = None
 
-    # שורה 2 היא המיקום הראשון (אחרי header), אז מתחילים מ-2
     for i, pos in enumerate(positions, start=2):
         if pos["position_id"] == str(position_id):
             row_index = i
