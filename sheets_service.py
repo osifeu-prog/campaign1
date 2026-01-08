@@ -39,10 +39,6 @@ def _append_row(sheet_name: str, values: List):
 # ------------------ USERS ------------------
 
 def append_user_row(data: Dict):
-    """
-    Users sheet columns:
-    user_id | username | full_name_telegram | role | city | email | referrer | joined_via_expert_id | created_at
-    """
     values = [
         str(data.get("user_id", "")),
         str(data.get("username", "")),
@@ -60,10 +56,6 @@ def append_user_row(data: Dict):
 # ------------------ EXPERTS ------------------
 
 def append_expert_row(data: Dict):
-    """
-    Experts sheet columns:
-    user_id | full_name | field | experience | position | links | why | created_at | status | group_link
-    """
     values = [
         str(data.get("user_id", "")),
         str(data.get("expert_full_name", "")),

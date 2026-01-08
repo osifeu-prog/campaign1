@@ -88,9 +88,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
 
     if update.message:
-        await update.message.reply_text(intro_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        await update.message.reply_text(
+            intro_text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown",
+        )
     else:
-        await update.callback_query.message.reply_text(intro_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        await update.callback_query.message.reply_text(
+            intro_text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown",
+        )
 
     return CHOOSING_ROLE
 
