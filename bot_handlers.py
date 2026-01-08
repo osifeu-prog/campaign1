@@ -38,6 +38,7 @@ ROLE_EXPERT = "expert"
 # ------------------ START ------------------
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # תמיכה גם ב-/start וגם ב-/start <ref>
     if update.message and update.message.text.startswith("/start "):
         parts = update.message.text.split(" ", maxsplit=1)
         if len(parts) == 2:
@@ -55,8 +56,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("תומך", callback_data=ROLE_SUPPORTER),
         ]
     ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await update.message.reply_text(intro_text, reply_markup=InlineKeyboardMarkup(keyboard))
+    # במקרה הרגיל (הודעת /start)
+    if update.message:
+        await update.message.reply_text(intro_text, reply_markup=reply_markup)
+    # ביטוח – אם זה הגיע מקריאה אחרת
+    elif update.callback_query:
+        await update.callback_query.message.reply_text(intro_text, reply_markup=reply_markup)
+
+    # חשוב: להחזיר CHOOSING_ROLE, והוא חייב להיות מוגדר ב-states
     return CHOOSING_ROLE
 
 
@@ -348,9 +357,19 @@ async def assign_position(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"מקום {pos_id} שויך למומחה {user_id}.")
 
 
-# ------------------ GROUP ID ------------------
+# ------------------ ID HELPERS ------------------
+
+async def my_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """הצגת ה-ID שלך"""
+    user_id = update.effective_user.id
+    await update.message.reply_text(
+        f"Your ID:\n`{user_id}`",
+        parse_mode="Markdown"
+    )
+
 
 async def group_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """הצגת ה-chat_id של הקבוצה / צ'אט"""
     chat = update.effective_chat
     await update.message.reply_text(
         f"Group ID:\n`{chat.id}`",
@@ -369,6 +388,8 @@ def get_conversation_handler():
     return ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
+            # חשוב: להוסיף את CHOOSING_ROLE כדי שהכפתורים יעבדו
+            CHOOSING_ROLE: [CallbackQueryHandler(choose_role)],
             SUPPORTER_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_name)],
             SUPPORTER_CITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_city)],
             SUPPORTER_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_email)],
