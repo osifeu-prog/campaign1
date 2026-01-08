@@ -7,6 +7,7 @@ from googleapiclient.discovery import build
 SPREADSHEET_ID = os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID")
 USERS_SHEET_NAME = os.getenv("USERS_SHEET_NAME", "Users")
 EXPERTS_SHEET_NAME = os.getenv("EXPERTS_SHEET_NAME", "Experts")
+POSITIONS_SHEET_NAME = os.getenv("POSITIONS_SHEET_NAME", "Positions")
 
 _scopes = ["https://www.googleapis.com/auth/spreadsheets"]
 
@@ -61,3 +62,111 @@ def append_expert_row(data: Dict):
         str(data.get("created_at", "")),
     ]
     _append_row(EXPERTS_SHEET_NAME, values)
+
+
+# ------------------ POSITIONS ------------------
+
+def init_positions():
+    """
+    מוודא שטבלת Positions קיימת ומכילה 121 שורות (1–121).
+    אם ריקה/חסרה – יוצר כותרות + 121 שורות עם ערכי ברירת מחדל.
+    """
+    service = _get_sheets_service()
+    range_name = f"{POSITIONS_SHEET_NAME}!A:E"
+
+    result = service.spreadsheets().values().get(
+        spreadsheetId=SPREADSHEET_ID,
+        range=range_name
+    ).execute()
+
+    rows = result.get("values", [])
+
+    # אם אין כותרות או פחות מ-2 שורות – נבנה מחדש
+    if len(rows) < 2:
+        header = ["position_id", "title", "description", "expert_user_id", "assigned_at"]
+        data_rows = []
+        for i in range(1, 122):
+            data_rows.append([
+                str(i),
+                f"Position {i}",          # TODO: אפשר לערוך בגיליון לשמות אמיתיים
+                "",                       # description – אפשר לערוך ידנית
+                "",
+                "",
+            ])
+
+        body = {"values": [header] + data_rows}
+        service.spreadsheets().values().update(
+            spreadsheetId=SPREADSHEET_ID,
+            range=range_name,
+            valueInputOption="RAW",
+            body=body
+        ).execute()
+
+
+def get_positions():
+    service = _get_sheets_service()
+    result = service.spreadsheets().values().get(
+        spreadsheetId=SPREADSHEET_ID,
+        range=f"{POSITIONS_SHEET_NAME}!A:E"
+    ).execute()
+
+    rows = result.get("values", [])
+    positions = []
+
+    if not rows:
+        return positions
+
+    for row in rows[1:]:  # skip header
+        positions.append({
+            "position_id": row[0] if len(row) > 0 else "",
+            "title": row[1] if len(row) > 1 else "",
+            "description": row[2] if len(row) > 2 else "",
+            "expert_user_id": row[3] if len(row) > 3 else "",
+            "assigned_at": row[4] if len(row) > 4 else "",
+        })
+
+    return positions
+
+
+def get_position(position_id: str):
+    for pos in get_positions():
+        if pos["position_id"] == str(position_id):
+            return pos
+    return None
+
+
+def position_is_free(position_id: str) -> bool:
+    pos = get_position(position_id)
+    if not pos:
+        return False
+    return pos["expert_user_id"] == ""
+
+
+def assign_position(position_id: str, user_id: str, timestamp: str):
+    """
+    משייך מקום למומחה (user_id).
+    מניח שהמקום קיים ו/או פנוי – בדיקה נעשית בבוט.
+    """
+    service = _get_sheets_service()
+
+    positions = get_positions()
+    row_index = None
+
+    # שורה 2 היא המיקום הראשון (אחרי header), אז מתחילים מ-2
+    for i, pos in enumerate(positions, start=2):
+        if pos["position_id"] == str(position_id):
+            row_index = i
+            break
+
+    if row_index is None:
+        raise ValueError("Position not found")
+
+    range_name = f"{POSITIONS_SHEET_NAME}!D{row_index}:E{row_index}"
+    body = {"values": [[str(user_id), timestamp]]}
+
+    service.spreadsheets().values().update(
+        spreadsheetId=SPREADSHEET_ID,
+        range=range_name,
+        valueInputOption="RAW",
+        body=body
+    ).execute()
