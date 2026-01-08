@@ -1,12 +1,17 @@
 from flask import Flask, request
 from telegram import Update
 from telegram.ext import Application, CommandHandler
-import config
+import os
 import bot_handlers
+
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+GOOGLE_SHEET_ID = os.getenv("GOOGLE_SHEET_ID")
+USERS_SHEET_NAME = os.getenv("USERS_SHEET_NAME")
+EXPERTS_SHEET_NAME = os.getenv("EXPERTS_SHEET_NAME")
 
 app = Flask(__name__)
 
-application = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
+application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 application.add_handler(CommandHandler("start", bot_handlers.start))
 
 @app.post("/webhook")
