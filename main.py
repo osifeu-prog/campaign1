@@ -66,6 +66,9 @@ application.add_handler(CommandHandler("assign", bot_handlers.assign_position))
 # Support command
 application.add_handler(CommandHandler("support", bot_handlers.support))
 
+# Expert group link (admin)
+application.add_handler(CommandHandler("set_expert_group", bot_handlers.set_expert_group))
+
 # Admin callbacks
 application.add_handler(
     CallbackQueryHandler(bot_handlers.expert_admin_callback, pattern="^expert_")

@@ -36,7 +36,13 @@ def _append_row(sheet_name: str, values: List):
     ).execute()
 
 
+# ------------------ USERS ------------------
+
 def append_user_row(data: Dict):
+    """
+    Users sheet columns:
+    user_id | username | full_name_telegram | role | city | email | referrer | joined_via_expert_id | created_at
+    """
     values = [
         str(data.get("user_id", "")),
         str(data.get("username", "")),
@@ -45,15 +51,18 @@ def append_user_row(data: Dict):
         str(data.get("city", "")),
         str(data.get("email", "")),
         str(data.get("referrer", "")),
+        str(data.get("joined_via_expert_id", "")),
         str(data.get("created_at", "")),
     ]
     _append_row(USERS_SHEET_NAME, values)
 
 
+# ------------------ EXPERTS ------------------
+
 def append_expert_row(data: Dict):
     """
-    מומלץ שגליון Experts יכלול כותרות:
-    user_id | full_name | field | experience | position | links | why | created_at | status
+    Experts sheet columns:
+    user_id | full_name | field | experience | position | links | why | created_at | status | group_link
     """
     values = [
         str(data.get("user_id", "")),
@@ -64,20 +73,15 @@ def append_expert_row(data: Dict):
         str(data.get("expert_links", "")),
         str(data.get("expert_why", "")),
         str(data.get("created_at", "")),
-        "pending",  # סטטוס התחלתי
+        "pending",
+        str(data.get("group_link", "")),
     ]
     _append_row(EXPERTS_SHEET_NAME, values)
 
 
-# ------------------ EXPERT STATUS ------------------
-
 def update_expert_status(user_id: str, new_status: str):
-    """
-    מעדכן את שדה ה-status של מומחה בגיליון Experts.
-    מחפש לפי user_id בעמודה הראשונה.
-    """
     service = _get_sheets_service()
-    range_name = f"{EXPERTS_SHEET_NAME}!A:I"
+    range_name = f"{EXPERTS_SHEET_NAME}!A:J"
 
     result = service.spreadsheets().values().get(
         spreadsheetId=SPREADSHEET_ID,
@@ -88,10 +92,8 @@ def update_expert_status(user_id: str, new_status: str):
     if not rows:
         return
 
-    # חיפוש השורה של המומחה
-    for idx, row in enumerate(rows[1:], start=2):  # החל משורה 2 (אחרי header)
+    for idx, row in enumerate(rows[1:], start=2):
         if len(row) > 0 and row[0] == str(user_id):
-            # עמודת status היא I (9)
             status_range = f"{EXPERTS_SHEET_NAME}!I{idx}:I{idx}"
             body = {"values": [[new_status]]}
             service.spreadsheets().values().update(
@@ -103,7 +105,52 @@ def update_expert_status(user_id: str, new_status: str):
             break
 
 
-# ------------------ POSITIONS (כמו שכבר בנינו) ------------------
+def update_expert_group_link(user_id: str, group_link: str):
+    service = _get_sheets_service()
+    range_name = f"{EXPERTS_SHEET_NAME}!A:J"
+
+    result = service.spreadsheets().values().get(
+        spreadsheetId=SPREADSHEET_ID,
+        range=range_name
+    ).execute()
+
+    rows = result.get("values", [])
+    if not rows:
+        return
+
+    for idx, row in enumerate(rows[1:], start=2):
+        if len(row) > 0 and row[0] == str(user_id):
+            group_range = f"{EXPERTS_SHEET_NAME}!J{idx}:J{idx}"
+            body = {"values": [[group_link]]}
+            service.spreadsheets().values().update(
+                spreadsheetId=SPREADSHEET_ID,
+                range=group_range,
+                valueInputOption="RAW",
+                body=body,
+            ).execute()
+            break
+
+
+def get_expert_group_link(user_id: str) -> str:
+    service = _get_sheets_service()
+    range_name = f"{EXPERTS_SHEET_NAME}!A:J"
+
+    result = service.spreadsheets().values().get(
+        spreadsheetId=SPREADSHEET_ID,
+        range=range_name
+    ).execute()
+
+    rows = result.get("values", [])
+    if not rows:
+        return ""
+
+    for row in rows[1:]:
+        if len(row) > 0 and row[0] == str(user_id):
+            return row[9] if len(row) > 9 else ""
+    return ""
+
+
+# ------------------ POSITIONS ------------------
 
 def init_positions():
     service = _get_sheets_service()
@@ -122,7 +169,7 @@ def init_positions():
         for i in range(1, 122):
             data_rows.append([
                 str(i),
-                f"Position {i}",  # TODO: עדכן שמות אמיתיים בגיליון
+                f"Position {i}",
                 "",
                 "",
                 "",
