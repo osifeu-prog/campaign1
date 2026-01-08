@@ -45,7 +45,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     intro_text = (
         "ברוך הבא למערכת הרישום.\n\n"
-        "TODO: הכנס כאן טקסט פתיחה משלך (על התנועה, החזון, המבנה וכו').\n\n"
+        "TODO: הכנס כאן טקסט פתיחה משלך (על התנועה, החזון וכו').\n\n"
         "איך תרצה להצטרף?"
     )
 
@@ -152,7 +152,6 @@ async def expert_position(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("נא לבחור מספר מקום בין 1 ל-121.")
         return EXPERT_POSITION
 
-    # בדיקה אם המקום פנוי בגיליון
     if not sheets_service.position_is_free(str(pos_num)):
         await update.message.reply_text(
             "המקום שבחרת כבר תפוס.\n"
@@ -160,7 +159,6 @@ async def expert_position(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return EXPERT_POSITION
 
-    # אם פנוי – נשמור ב-user_data ונעדכן את הגיליון
     context.user_data["expert_position"] = str(pos_num)
 
     try:
@@ -176,7 +174,7 @@ async def expert_position(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return EXPERT_POSITION
 
-    await update.message.reply_text("המקום נרשם עבורך בהצלחה.\nהוסף קישורים רלוונטיים:")
+    await update.message.reply_text("המקום נרשם עבורך.\nהוסף קישורים רלוונטיים:")
     return EXPERT_LINKS
 
 
@@ -214,18 +212,83 @@ async def expert_why(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sheets_service.append_user_row(user_row)
     sheets_service.append_expert_row(expert_row)
 
-    # לוג לקבוצת לוגים אם קיים
+    # שליחת בקשה לאישור לקבוצת לוגים
     if LOG_GROUP_ID:
         try:
+            keyboard = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton(
+                        "✅ אשר",
+                        callback_data=f"expert_approve:{expert_row['user_id']}"
+                    ),
+                    InlineKeyboardButton(
+                        "❌ דחה",
+                        callback_data=f"expert_reject:{expert_row['user_id']}"
+                    ),
+                ]
+            ])
+
+            text = (
+                "מומחה חדש ממתין לאישור:\n"
+                f"שם: {expert_row['expert_full_name']}\n"
+                f"תחום: {expert_row['expert_field']}\n"
+                f"מקום: {expert_row['expert_position']}\n"
+                f"user_id: {expert_row['user_id']}\n"
+            )
+
             await context.bot.send_message(
                 chat_id=int(LOG_GROUP_ID),
-                text=f"מומחה חדש נרשם:\n{expert_row}",
+                text=text,
+                reply_markup=keyboard,
             )
         except Exception as e:
             print("Failed to send log message:", e)
 
-    await update.message.reply_text("תודה, הפרטים נשמרו והמקום שויך לך.")
+    await update.message.reply_text(
+        "תודה, הפרטים נשמרו.\n"
+        "בקשה לאישור נשלחה למנהלים."
+    )
     return ConversationHandler.END
+
+
+# ------------------ ADMIN CALLBACKS ------------------
+
+async def expert_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    from_id = str(query.from_user.id)
+    if from_id not in ADMIN_IDS:
+        await query.edit_message_text("אין לך הרשאה לבצע פעולה זו.")
+        return
+
+    data = query.data  # example: "expert_approve:123456789"
+    action, user_id = data.split(":")
+
+    if action == "expert_approve":
+        sheets_service.update_expert_status(user_id, "approved")
+        await _notify_expert(context, user_id, approved=True)
+        await query.edit_message_text(f"מומחה {user_id} אושר.")
+    elif action == "expert_reject":
+        sheets_service.update_expert_status(user_id, "rejected")
+        await _notify_expert(context, user_id, approved=False)
+        await query.edit_message_text(f"מומחה {user_id} נדחה.")
+
+
+async def _notify_expert(context: ContextTypes.DEFAULT_TYPE, user_id: str, approved: bool):
+    text = (
+        "המועמדות שלך כמומחה אושרה. תודה על השתתפותך."
+        if approved
+        else "המועמדות שלך כמומחה לא אושרה בשלב זה."
+    )
+
+    try:
+        await context.bot.send_message(
+            chat_id=int(user_id),
+            text=text,
+        )
+    except Exception as e:
+        print("Failed to notify expert:", e)
 
 
 # ------------------ POSITIONS COMMANDS ------------------
@@ -295,7 +358,7 @@ async def group_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-# ------------------ CANCEL ------------------
+# ------------------ CANCEL + CONVERSATION ------------------
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("ההרשמה בוטלה.")
@@ -303,7 +366,6 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def get_conversation_handler():
-    # כאן אני משאיר את ה-conversation פשוט – כל הפקודות הנוספות הן מחוץ ל-flow
     return ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
