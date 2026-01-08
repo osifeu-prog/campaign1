@@ -3,7 +3,7 @@ from fastapi import FastAPI, Request
 from telegram import Update
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler
 import uvicorn
-import bot_handlers
+from bot import bot_handlers
 import sheets_service
 
 
