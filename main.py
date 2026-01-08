@@ -15,7 +15,8 @@ application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 # Conversation handler
 application.add_handler(bot_handlers.get_conversation_handler())
 
-# פקודות מערכת
+# פקודות מערכת / עזר
+application.add_handler(CommandHandler("myid", bot_handlers.my_id))
 application.add_handler(CommandHandler("groupid", bot_handlers.group_id))
 application.add_handler(CommandHandler("positions", bot_handlers.list_positions))
 application.add_handler(CommandHandler("position", bot_handlers.position_details))
