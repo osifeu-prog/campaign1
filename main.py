@@ -15,14 +15,17 @@ application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 # Conversation handler
 application.add_handler(bot_handlers.get_conversation_handler())
 
-# פקודות מערכת / עזר
+# Utility commands
 application.add_handler(CommandHandler("myid", bot_handlers.my_id))
 application.add_handler(CommandHandler("groupid", bot_handlers.group_id))
+application.add_handler(CommandHandler("ALL", bot_handlers.all_commands))
+
+# Positions commands
 application.add_handler(CommandHandler("positions", bot_handlers.list_positions))
 application.add_handler(CommandHandler("position", bot_handlers.position_details))
 application.add_handler(CommandHandler("assign", bot_handlers.assign_position))
 
-# כפתורי אדמין למומחים
+# Admin callbacks
 application.add_handler(
     CallbackQueryHandler(bot_handlers.expert_admin_callback, pattern="^expert_")
 )
