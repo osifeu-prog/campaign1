@@ -73,6 +73,8 @@ application.add_handler(CommandHandler("all", bot_handlers.all_commands))
 application.add_handler(CommandHandler("positions", bot_handlers.list_positions))
 application.add_handler(CommandHandler("position", bot_handlers.position_details))
 application.add_handler(CommandHandler("assign", bot_handlers.assign_position))
+application.add_handler(CommandHandler("reset_position", bot_handlers.reset_position_cmd))
+application.add_handler(CommandHandler("reset_all_positions", bot_handlers.reset_all_positions_cmd))
 
 # Support
 application.add_handler(CommandHandler("support", bot_handlers.support))
@@ -88,9 +90,19 @@ application.add_handler(
     CallbackQueryHandler(bot_handlers.expert_admin_callback, pattern="^expert_(approve|reject):")
 )
 
-# Unknown commands handler – חייב להיות אחרון
+# Unknown commands handler – מסונן כדי לא לבלוע פקודות מוכרות
+KNOWN_COMMANDS_PATTERN = (
+    r"^/(start|menu|help|ALL|all|myid|groupid|"
+    r"positions|position|assign|support|set_expert_group|"
+    r"admin_menu|reset_position|reset_all_positions)"
+    r"(?:@[\w_]+)?\b"
+)
+
 application.add_handler(
-    MessageHandler(tg_filters.COMMAND, bot_handlers.unknown_command),
+    MessageHandler(
+        tg_filters.COMMAND & ~tg_filters.Regex(KNOWN_COMMANDS_PATTERN),
+        bot_handlers.unknown_command
+    ),
     group=1,
 )
 
