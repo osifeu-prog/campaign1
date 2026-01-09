@@ -1,6 +1,6 @@
 import os
 import json
-from typing import Dict, List
+from typing import Dict, List, Optional
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 
@@ -11,16 +11,40 @@ POSITIONS_SHEET_NAME = os.getenv("POSITIONS_SHEET_NAME", "Positions")
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
+# ------------------ INTERNAL CACHES ------------------
+
+_service = None  # Singleton ל-Google Sheets service
+
+_experts_cache: Optional[List[List[str]]] = None  # rows גולמיים מה-Experts
+_positions_cache: Optional[List[Dict[str, str]]] = None  # רשימת dicts כמו ש-get_positions מחזיר
+
+
+def _invalidate_experts_cache():
+    global _experts_cache
+    _experts_cache = None
+
+
+def _invalidate_positions_cache():
+    global _positions_cache
+    _positions_cache = None
+
+
+# ------------------ SERVICE ------------------
 
 def get_service():
+    global _service
+
+    if _service is not None:
+        return _service
+
     creds_json = os.getenv("GOOGLE_CREDENTIALS_JSON")
     if not creds_json:
         raise RuntimeError("GOOGLE_CREDENTIALS_JSON is missing")
 
     info = json.loads(creds_json)
     credentials = Credentials.from_service_account_info(info, scopes=SCOPES)
-    service = build("sheets", "v4", credentials=credentials)
-    return service
+    _service = build("sheets", "v4", credentials=credentials)
+    return _service
 
 
 def append_row(sheet_name: str, values: List):
@@ -51,6 +75,7 @@ def append_user_row(data: Dict):
         str(data.get("created_at", "")),
     ]
     append_row(USERS_SHEET_NAME, values)
+    # לא נדרש cache ל-Users כרגע, כי אין פונקציות קריאה
 
 
 # ------------------ EXPERTS ------------------
@@ -69,6 +94,30 @@ def append_expert_row(data: Dict):
         str(data.get("group_link", "")),
     ]
     append_row(EXPERTS_SHEET_NAME, values)
+    _invalidate_experts_cache()
+
+
+def _load_experts_rows() -> List[List[str]]:
+    """
+    טוען את כל שורות המומחים מהגיליון, עם cache.
+    השורה הראשונה היא header, השאר נתונים.
+    """
+    global _experts_cache
+
+    if _experts_cache is not None:
+        return _experts_cache
+
+    service = get_service()
+    range_name = f"{EXPERTS_SHEET_NAME}!A:J"
+
+    result = service.spreadsheets().values().get(
+        spreadsheetId=SPREADSHEET_ID,
+        range=range_name
+    ).execute()
+
+    rows = result.get("values", [])
+    _experts_cache = rows
+    return rows
 
 
 def update_expert_status(user_id: str, new_status: str):
@@ -96,6 +145,8 @@ def update_expert_status(user_id: str, new_status: str):
             ).execute()
             break
 
+    _invalidate_experts_cache()
+
 
 def update_expert_group_link(user_id: str, group_link: str):
     service = get_service()
@@ -122,17 +173,11 @@ def update_expert_group_link(user_id: str, group_link: str):
             ).execute()
             break
 
+    _invalidate_experts_cache()
+
 
 def get_expert_group_link(user_id: str) -> str:
-    service = get_service()
-    range_name = f"{EXPERTS_SHEET_NAME}!A:J"
-
-    result = service.spreadsheets().values().get(
-        spreadsheetId=SPREADSHEET_ID,
-        range=range_name
-    ).execute()
-
-    rows = result.get("values", [])
+    rows = _load_experts_rows()
     if not rows:
         return ""
 
@@ -142,25 +187,18 @@ def get_expert_group_link(user_id: str) -> str:
     return ""
 
 
-# ------------------ EXPERTS (ADMIN HELPERS) ------------------
-
 def get_experts_pending():
-    service = get_service()
-    range_name = f"{EXPERTS_SHEET_NAME}!A:J"
-
-    result = service.spreadsheets().values().get(
-        spreadsheetId=SPREADSHEET_ID,
-        range=range_name
-    ).execute()
-
-    rows = result.get("values", [])
+    """
+    מחזיר רשימת מומחים במצב 'pending' כ-list של dicts.
+    """
+    rows = _load_experts_rows()
     experts = []
 
     if not rows:
         return experts
 
     for row in rows[1:]:
-        # עמודה I = סטטוס
+        # עמודה I (אינדקס 8) = status
         if len(row) > 8 and row[8] == "pending":
             experts.append({
                 "user_id": row[0] if len(row) > 0 else "",
@@ -210,8 +248,18 @@ def init_positions():
             body=body
         ).execute()
 
+    _invalidate_positions_cache()
 
-def get_positions():
+
+def _load_positions() -> List[Dict[str, str]]:
+    """
+    טוען את כל המקומות כ-list של dicts, עם cache.
+    """
+    global _positions_cache
+
+    if _positions_cache is not None:
+        return _positions_cache
+
     service = get_service()
     result = service.spreadsheets().values().get(
         spreadsheetId=SPREADSHEET_ID,
@@ -219,25 +267,28 @@ def get_positions():
     ).execute()
 
     rows = result.get("values", [])
-    positions = []
+    positions: List[Dict[str, str]] = []
 
-    if not rows:
-        return positions
+    if rows:
+        for row in rows[1:]:
+            positions.append({
+                "position_id": row[0] if len(row) > 0 else "",
+                "title": row[1] if len(row) > 1 else "",
+                "description": row[2] if len(row) > 2 else "",
+                "expert_user_id": row[3] if len(row) > 3 else "",
+                "assigned_at": row[4] if len(row) > 4 else "",
+            })
 
-    for row in rows[1:]:
-        positions.append({
-            "position_id": row[0] if len(row) > 0 else "",
-            "title": row[1] if len(row) > 1 else "",
-            "description": row[2] if len(row) > 2 else "",
-            "expert_user_id": row[3] if len(row) > 3 else "",
-            "assigned_at": row[4] if len(row) > 4 else "",
-        })
-
+    _positions_cache = positions
     return positions
 
 
+def get_positions():
+    return _load_positions()
+
+
 def get_position(position_id: str):
-    for pos in get_positions():
+    for pos in _load_positions():
         if pos["position_id"] == str(position_id):
             return pos
     return None
@@ -253,7 +304,7 @@ def position_is_free(position_id: str) -> bool:
 def assign_position(position_id: str, user_id: str, timestamp: str):
     service = get_service()
 
-    positions = get_positions()
+    positions = _load_positions()
     row_index = None
 
     for i, pos in enumerate(positions, start=2):
@@ -273,3 +324,5 @@ def assign_position(position_id: str, user_id: str, timestamp: str):
         valueInputOption="RAW",
         body=body
     ).execute()
+
+    _invalidate_positions_cache()
