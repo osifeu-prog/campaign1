@@ -1,156 +1,59 @@
+# ===============================
+# main.py – נקודת כניסה לבוט
+# ===============================
+
 import os
+
 from fastapi import FastAPI, Request
 from telegram import Update
 from telegram.ext import (
-    Application,
+    ApplicationBuilder,
     CommandHandler,
     CallbackQueryHandler,
-    MessageHandler,
-    filters as tg_filters,
 )
-import uvicorn
 
 from bot import bot_handlers
-import sheets_service
+from bot.admin_handlers import (
+    list_positions,
+    position_details,
+    assign_position_cmd,
+    reset_position_cmd,
+    reset_all_positions_cmd,
+    fix_sheets,
+    validate_sheets,
+    sheet_info,
+    clear_expert_duplicates_cmd,
+    clear_user_duplicates_cmd,
+    find_user,
+    find_expert,
+    find_position,
+    list_approved_experts,
+    list_rejected_experts,
+    list_supporters,
+    admin_menu,
+)
+from services import sheets_service
 
-
-def validate_env():
-    required_vars = {
-        "TELEGRAM_BOT_TOKEN": os.getenv("TELEGRAM_BOT_TOKEN"),
-        "GOOGLE_CREDENTIALS_JSON": os.getenv("GOOGLE_CREDENTIALS_JSON"),
-        "GOOGLE_SHEETS_SPREADSHEET_ID": os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID"),
-    }
-
-    optional_vars = {
-        "LOG_GROUP_ID": os.getenv("LOG_GROUP_ID"),
-        "ALL_MEMBERS_GROUP_ID": os.getenv("ALL_MEMBERS_GROUP_ID"),
-        "ACTIVISTS_GROUP_ID": os.getenv("ACTIVISTS_GROUP_ID"),
-        "EXPERTS_GROUP_ID": os.getenv("EXPERTS_GROUP_ID"),
-        "SUPPORT_GROUP_ID": os.getenv("SUPPORT_GROUP_ID"),
-        "ADMIN_IDS": os.getenv("ADMIN_IDS"),
-    }
-
-    print("=== ENVIRONMENT VALIDATION START ===")
-
-    for key, value in required_vars.items():
-        if not value:
-            print(f"[WARNING] Missing REQUIRED variable: {key}")
-        else:
-            print(f"[OK] {key} loaded")
-
-    for key, value in optional_vars.items():
-        if not value:
-            print(f"[INFO] Optional variable missing: {key}")
-        else:
-            print(f"[OK] {key} loaded")
-
-    print("=== ENVIRONMENT VALIDATION END ===")
-
-
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-
-if not TELEGRAM_BOT_TOKEN:
-    raise RuntimeError("TELEGRAM_BOT_TOKEN is not set. Cannot start bot.")
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # לדוגמה: https://campaign1-production.up.railway.app/webhook
 
 app = FastAPI()
 
-application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-
-# ============================================================
-# 1) Regular commands
-# ============================================================
-
-application.add_handler(CommandHandler("start", bot_handlers.start))
-application.add_handler(CommandHandler("menu", bot_handlers.menu_command))
-application.add_handler(CommandHandler("help", bot_handlers.menu_command))
-application.add_handler(CommandHandler("ALL", bot_handlers.all_commands))
-application.add_handler(CommandHandler("all", bot_handlers.all_commands))
-
-application.add_handler(CommandHandler("myid", bot_handlers.my_id))
-application.add_handler(CommandHandler("groupid", bot_handlers.group_id))
-
-# ============================================================
-# 2) Admin commands
-# ============================================================
-
-application.add_handler(CommandHandler("positions", bot_handlers.list_positions))
-application.add_handler(CommandHandler("position", bot_handlers.position_details))
-application.add_handler(CommandHandler("assign", bot_handlers.assign_position))
-application.add_handler(CommandHandler("reset_position", bot_handlers.reset_position_cmd))
-application.add_handler(CommandHandler("reset_all_positions", bot_handlers.reset_all_positions_cmd))
-
-application.add_handler(CommandHandler("find_user", bot_handlers.find_user))
-application.add_handler(CommandHandler("find_expert", bot_handlers.find_expert))
-application.add_handler(CommandHandler("find_position", bot_handlers.find_position))
-
-application.add_handler(CommandHandler("list_approved_experts", bot_handlers.list_approved_experts))
-application.add_handler(CommandHandler("list_rejected_experts", bot_handlers.list_rejected_experts))
-application.add_handler(CommandHandler("list_supporters", bot_handlers.list_supporters))
-
-application.add_handler(CommandHandler("admin_menu", bot_handlers.admin_menu))
-
-# ============================================================
-# 3) Support & expert group
-# ============================================================
-
-application.add_handler(CommandHandler("support", bot_handlers.support))
-application.add_handler(CommandHandler("set_expert_group", bot_handlers.set_expert_group))
-
-# ============================================================
-# 4) Expert admin callback buttons (approve/reject)
-# ============================================================
-
-application.add_handler(
-    CallbackQueryHandler(
-        bot_handlers.expert_admin_callback,
-        pattern="^expert_(approve|reject):"
-    )
+application = (
+    ApplicationBuilder()
+    .token(TOKEN)
+    .build()
 )
 
-# ============================================================
-# 5) Global callback handler for ALL menu buttons
-# ============================================================
 
-application.add_handler(
-    CallbackQueryHandler(
-        bot_handlers.handle_menu_callback,
-        pattern="^(menu_|apply_|admin_|menu_positions)"
-    )
-)
+# ---------- Startup ----------
 
-# ============================================================
-# 6) ConversationHandler — ALWAYS LAST
-# ============================================================
+def validate_env():
+    if not TOKEN:
+        raise Exception("Missing TELEGRAM_BOT_TOKEN")
+    if not sheets_service.SPREADSHEET_ID:
+        raise Exception("Missing GOOGLE_SHEETS_SPREADSHEET_ID")
 
-application.add_handler(
-    bot_handlers.get_conversation_handler()
-)
-
-# ============================================================
-# 7) Unknown commands handler
-# ============================================================
-
-KNOWN_COMMANDS_PATTERN = (
-    r"^/(start|menu|help|ALL|all|myid|groupid|"
-    r"positions|position|assign|support|set_expert_group|"
-    r"admin_menu|reset_position|reset_all_positions|"
-    r"find_user|find_expert|find_position|"
-    r"list_approved_experts|list_rejected_experts|list_supporters)"
-    r"(?:@[\w_]+)?\b"
-)
-
-application.add_handler(
-    MessageHandler(
-        tg_filters.COMMAND & ~tg_filters.Regex(KNOWN_COMMANDS_PATTERN),
-        bot_handlers.unknown_command
-    ),
-    group=1,
-)
-
-# ============================================================
-# 8) Startup
-# ============================================================
-import sheets_service
 
 @app.on_event("startup")
 async def startup_event():
@@ -163,37 +66,69 @@ async def startup_event():
         print("❌ Sheets validation failed:", e)
         raise
 
+    # ConversationHandler
+    conv_handler = bot_handlers.get_conversation_handler()
+    application.add_handler(conv_handler)
+
+    # Callback של מומחים (approve/reject)
+    application.add_handler(CallbackQueryHandler(
+        bot_handlers.handle_menu_callback,
+        pattern="^(menu_main|menu_support|menu_expert|menu_admin|apply_expert_again|apply_supporter|admin_pending_experts|admin_groups|menu_positions)$"
+    ))
+    application.add_handler(CallbackQueryHandler(
+        bot_handlers.handle_menu_callback,
+        pattern="^(menu_.*|apply_.*)$"
+    ))
+    application.add_handler(CallbackQueryHandler(
+        bot_handlers.expert_admin_callback,
+        pattern="^expert_(approve|reject):"
+    ))
+
+    # פקודות כלליות
+    application.add_handler(CommandHandler("menu", bot_handlers.menu_command))
+    application.add_handler(CommandHandler("help", bot_handlers.all_commands))
+    application.add_handler(CommandHandler("myid", bot_handlers.my_id))
+    application.add_handler(CommandHandler("groupid", bot_handlers.group_id))
+
+    # פקודות אדמין – מקומות
+    application.add_handler(CommandHandler("positions", list_positions))
+    application.add_handler(CommandHandler("position", position_details))
+    application.add_handler(CommandHandler("assign", assign_position_cmd))
+    application.add_handler(CommandHandler("reset_position", reset_position_cmd))
+    application.add_handler(CommandHandler("reset_all_positions", reset_all_positions_cmd))
+
+    # פקודות אדמין – שיטס
+    application.add_handler(CommandHandler("fix_sheets", fix_sheets))
+    application.add_handler(CommandHandler("validate_sheets", validate_sheets))
+    application.add_handler(CommandHandler("sheet_info", sheet_info))
+    application.add_handler(CommandHandler("clear_expert_duplicates", clear_expert_duplicates_cmd))
+    application.add_handler(CommandHandler("clear_user_duplicates", clear_user_duplicates_cmd))
+
+    # פקודות אדמין – חיפוש ורשימות
+    application.add_handler(CommandHandler("find_user", find_user))
+    application.add_handler(CommandHandler("find_expert", find_expert))
+    application.add_handler(CommandHandler("find_position", find_position))
+    application.add_handler(CommandHandler("list_approved_experts", list_approved_experts))
+    application.add_handler(CommandHandler("list_rejected_experts", list_rejected_experts))
+    application.add_handler(CommandHandler("list_supporters", list_supporters))
+    application.add_handler(CommandHandler("admin_menu", admin_menu))
+
+    # Unknown command handler (להוסיף בסוף)
+    application.add_handler(CommandHandler(None, bot_handlers.unknown_command))
+
     await application.initialize()
     await application.start()
     print("Bot initialized and started")
-    print("Positions sheet initialization skipped (not required)")
 
-# ============================================================
-# 9) Webhook
-# ============================================================
+
+# ---------- Webhook endpoint ----------
 
 @app.post("/webhook")
-async def webhook(request: Request):
-    try:
-        data = await request.json()
-    except Exception:
-        return {"status": "ignored"}
-
+async def telegram_webhook(request: Request):
+    """
+    נקודת קצה לקבלת עדכונים מהטלגרם
+    """
+    data = await request.json()
     update = Update.de_json(data, application.bot)
-
-    try:
-        await application.process_update(update)
-    except Exception as e:
-        print("Error processing update:", e)
-
-    return {"status": "ok"}
-
-
-# ============================================================
-# 10) Run local server
-# ============================================================
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))
-    uvicorn.run("main:app", host="0.0.0.0", port=port)
-
+    await application.process_update(update)
+    return {"ok": True}
