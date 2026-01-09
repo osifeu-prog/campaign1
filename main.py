@@ -150,16 +150,23 @@ application.add_handler(
 # ============================================================
 # 8) Startup
 # ============================================================
+import sheets_service
 
 @app.on_event("startup")
 async def startup_event():
     validate_env()
 
+    print("Validating Google Sheets structure...")
+    try:
+        sheets_service.validate_all_sheets()
+    except Exception as e:
+        print("❌ Sheets validation failed:", e)
+        raise
+
     await application.initialize()
     await application.start()
     print("Bot initialized and started")
     print("Positions sheet initialization skipped (not required)")
-
 
 # ============================================================
 # 9) Webhook
@@ -189,3 +196,4 @@ async def webhook(request: Request):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     uvicorn.run("main:app", host="0.0.0.0", port=port)
+
