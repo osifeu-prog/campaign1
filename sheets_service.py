@@ -142,6 +142,40 @@ def get_expert_group_link(user_id: str) -> str:
     return ""
 
 
+# ------------------ EXPERTS (ADMIN HELPERS) ------------------
+
+def get_experts_pending():
+    service = get_service()
+    range_name = f"{EXPERTS_SHEET_NAME}!A:J"
+
+    result = service.spreadsheets().values().get(
+        spreadsheetId=SPREADSHEET_ID,
+        range=range_name
+    ).execute()
+
+    rows = result.get("values", [])
+    experts = []
+
+    if not rows:
+        return experts
+
+    for row in rows[1:]:
+        # עמודה I = סטטוס
+        if len(row) > 8 and row[8] == "pending":
+            experts.append({
+                "user_id": row[0] if len(row) > 0 else "",
+                "expert_full_name": row[1] if len(row) > 1 else "",
+                "expert_field": row[2] if len(row) > 2 else "",
+                "expert_experience": row[3] if len(row) > 3 else "",
+                "expert_position": row[4] if len(row) > 4 else "",
+                "expert_links": row[5] if len(row) > 5 else "",
+                "expert_why": row[6] if len(row) > 6 else "",
+                "created_at": row[7] if len(row) > 7 else "",
+            })
+
+    return experts
+
+
 # ------------------ POSITIONS ------------------
 
 def init_positions():
