@@ -74,14 +74,24 @@ def validate_env():
 
 @app.on_event("startup")
 async def startup_event():
+    """
+    פונקציית האתחול של הבוט:
+    - בדיקת ENV
+    - Smart Validation לגיליונות
+    - טעינת כל ה־handlers
+    - הפעלת הבוט
+    """
+
     validate_env()
 
-    print("Validating Google Sheets structure...")
-    try:
-        sheets_service.validate_all_sheets()
-    except Exception as e:
-        print("❌ Sheets validation failed:", e)
-        raise
+    print("🚀 Starting bot...")
+    print("🔍 Running Smart Validation on Google Sheets...")
+
+    # --- מנגנון תיקוף חכם ---
+    sheets_service.smart_validate_sheets()
+
+    print("✔ Sheets validated successfully")
+    print("🔧 Initializing bot handlers...")
 
     # ConversationHandler הראשי
     conv_handler = bot_handlers.get_conversation_handler()
@@ -132,9 +142,11 @@ async def startup_event():
     # --- פקודות לא מוכרות ---
     application.add_handler(MessageHandler(filters.COMMAND, bot_handlers.unknown_command))
 
+    # --- הפעלת הבוט ---
     await application.initialize()
     await application.start()
-    print("Bot initialized and started")
+
+    print("🤖 Bot initialized and running!")
 
 
 # ===============================
