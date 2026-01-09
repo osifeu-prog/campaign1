@@ -6,10 +6,6 @@ from typing import List, Dict, Optional
 import gspread
 from google.oauth2.service_account import Credentials
 
-# ============================================================
-#  ENVIRONMENT
-# ============================================================
-
 SPREADSHEET_ID = os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID")
 USERS_SHEET_NAME = os.getenv("USERS_SHEET_NAME", "Users")
 EXPERTS_SHEET_NAME = os.getenv("EXPERTS_SHEET_NAME", "Experts")
@@ -26,9 +22,6 @@ SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 credentials = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
 gc = gspread.authorize(credentials)
 
-# ============================================================
-#  LOAD SHEETS
-# ============================================================
 
 def _open_sheet(name: str):
     try:
@@ -38,16 +31,13 @@ def _open_sheet(name: str):
         print(f"Failed to open sheet {name}: {e}")
         raise
 
+
 users_sheet = _open_sheet(USERS_SHEET_NAME)
 experts_sheet = _open_sheet(EXPERTS_SHEET_NAME)
 positions_sheet = _open_sheet(POSITIONS_SHEET_NAME)
 
-# ============================================================
-#  USERS
-# ============================================================
 
 def append_user_row(row: Dict):
-    """Add a supporter/expert user row to Users sheet."""
     users_sheet.append_row([
         row.get("user_id", ""),
         row.get("username", ""),
@@ -62,19 +52,14 @@ def append_user_row(row: Dict):
 
 
 def get_supporter_by_id(user_id: str) -> Optional[Dict]:
-    """Return supporter row by user_id."""
     rows = users_sheet.get_all_records()
     for row in rows:
         if str(row.get("user_id")) == str(user_id):
             return row
     return None
 
-# ============================================================
-#  EXPERTS
-# ============================================================
 
 def append_expert_row(row: Dict):
-    """Add expert application row."""
     experts_sheet.append_row([
         row.get("user_id", ""),
         row.get("expert_full_name", ""),
@@ -85,7 +70,7 @@ def append_expert_row(row: Dict):
         row.get("expert_why", ""),
         row.get("created_at", ""),
         row.get("group_link", ""),
-        "pending",  # default status
+        "pending",
     ])
 
 
@@ -141,9 +126,6 @@ def get_experts_pending() -> List[Dict]:
     rows = experts_sheet.get_all_records()
     return [row for row in rows if row.get("status") == "pending"]
 
-# ============================================================
-#  POSITIONS
-# ============================================================
 
 def get_positions() -> List[Dict]:
     return positions_sheet.get_all_records()
