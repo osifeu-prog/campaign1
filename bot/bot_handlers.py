@@ -1130,31 +1130,67 @@ async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "נסה /menu כדי לראות את כל האפשרויות."
     )
 
-
 # ============================================
 # ===== CONVERSATION HANDLER FACTORY =========
 # ============================================
 
 def get_conversation_handler() -> ConversationHandler:
     return ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
+        entry_points=[
+            CommandHandler("start", start),
+        ],
+
         states={
+
+            # --- בחירת תפקיד ---
             CHOOSING_ROLE: [
                 CallbackQueryHandler(choose_role, pattern="^(supporter|expert)$"),
-                CallbackQueryHandler(handle_menu_callback),
+                # חשוב: לא לשים כאן handle_menu_callback ללא pattern
             ],
-            SUPPORTER_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_name)],
-            SUPPORTER_CITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_city)],
-            SUPPORTER_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_email)],
-            SUPPORTER_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_phone)],
-            SUPPORTER_FEEDBACK: [MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_feedback)],
-            EXPERT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, expert_name)],
-            EXPERT_FIELD: [MessageHandler(filters.TEXT & ~filters.COMMAND, expert_field)],
-            EXPERT_EXPERIENCE: [MessageHandler(filters.TEXT & ~filters.COMMAND, expert_experience)],
-            EXPERT_POSITION: [MessageHandler(filters.TEXT & ~filters.COMMAND, expert_position)],
-            EXPERT_LINKS: [MessageHandler(filters.TEXT & ~filters.COMMAND, expert_links)],
-            EXPERT_WHY: [MessageHandler(filters.TEXT & ~filters.COMMAND, expert_why)],
+
+            # --- תומך ---
+            SUPPORTER_NAME: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_name)
+            ],
+            SUPPORTER_CITY: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_city)
+            ],
+            SUPPORTER_EMAIL: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_email)
+            ],
+            SUPPORTER_PHONE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_phone)
+            ],
+            SUPPORTER_FEEDBACK: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_feedback)
+            ],
+
+            # --- מומחה ---
+            EXPERT_NAME: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, expert_name)
+            ],
+            EXPERT_FIELD: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, expert_field)
+            ],
+            EXPERT_EXPERIENCE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, expert_experience)
+            ],
+            EXPERT_POSITION: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, expert_position)
+            ],
+            EXPERT_LINKS: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, expert_links)
+            ],
+            EXPERT_WHY: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, expert_why)
+            ],
         },
-        fallbacks=[CommandHandler("cancel", cancel)],
+
+        fallbacks=[
+            CommandHandler("start", start),   # מאפשר להתחיל מחדש
+            CommandHandler("cancel", cancel),
+        ],
+
+        allow_reentry=True,   # מאפשר /start באמצע תהליך
         per_message=False,
     )
