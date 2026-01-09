@@ -45,10 +45,8 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
 app = FastAPI()
 
-# Telegram bot application
 application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
-# Handlers
 application.add_handler(bot_handlers.get_conversation_handler())
 application.add_handler(CommandHandler("myid", bot_handlers.my_id))
 application.add_handler(CommandHandler("groupid", bot_handlers.group_id))
@@ -78,7 +76,6 @@ async def startup_event():
 
 @app.post("/webhook")
 async def webhook(request: Request):
-    # Telegram sometimes sends updates that are not valid JSON
     try:
         data = await request.json()
     except Exception:
