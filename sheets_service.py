@@ -170,3 +170,54 @@ def reset_all_positions():
     for idx, row in enumerate(rows, start=2):
         positions_sheet.update_cell(idx, 4, "")
         positions_sheet.update_cell(idx, 5, "")
+
+def validate_headers(sheet, expected_headers):
+    """
+    בודק שהכותרות בשורה 1:
+    - קיימות
+    - ייחודיות
+    - תואמות למה שהבוט צריך
+    """
+    headers = sheet.row_values(1)
+
+    # בדיקה: האם יש כפילויות
+    if len(headers) != len(set(headers)):
+        raise ValueError(f"Duplicate headers found in sheet '{sheet.title}'")
+
+    # בדיקה: האם כל הכותרות הנדרשות קיימות
+    missing = [h for h in expected_headers if h not in headers]
+    if missing:
+        raise ValueError(
+            f"Missing required headers in sheet '{sheet.title}': {missing}"
+        )
+
+    return True
+
+
+def validate_all_sheets():
+    """
+    בודק את כל הגיליונות: Users, Experts, Positions
+    """
+    # כותרות תקינות עבור כל גיליון
+    expected_users = [
+        "user_id", "username", "full_name_telegram", "role",
+        "city", "email", "referrer", "joined_via_expert_id", "created_at"
+    ]
+
+    expected_experts = [
+        "user_id", "expert_full_name", "expert_field", "expert_experience",
+        "expert_position", "expert_links", "expert_why",
+        "created_at", "status", "group_link"
+    ]
+
+    expected_positions = [
+        "position_id", "title", "description",
+        "expert_user_id", "assigned_at"
+    ]
+
+    # בדיקה בפועל
+    validate_headers(users_sheet, expected_users)
+    validate_headers(experts_sheet, expected_experts)
+    validate_headers(positions_sheet, expected_positions)
+
+    print("✔ All sheets validated successfully")
