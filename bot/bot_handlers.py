@@ -111,7 +111,7 @@ async def send_main_menu(update: Optional[Update], context: ContextTypes.DEFAULT
     reply_markup = build_main_menu_for_user(user_id)
 
     if update.callback_query:
-        await update.callback_query.edit_text(text, reply_markup=reply_markup)
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
     else:
         await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
 
@@ -1219,3 +1219,4 @@ def get_conversation_handler() -> ConversationHandler:
         allow_reentry=True,
         per_message=False,
     )
+
