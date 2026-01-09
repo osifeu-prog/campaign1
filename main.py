@@ -85,12 +85,12 @@ application.add_handler(CommandHandler("set_expert_group", bot_handlers.set_expe
 # Admin menu
 application.add_handler(CommandHandler("admin_menu", bot_handlers.admin_menu))
 
-# Expert admin callbacks (אישור/דחייה)
+# Expert admin callbacks
 application.add_handler(
     CallbackQueryHandler(bot_handlers.expert_admin_callback, pattern="^expert_(approve|reject):")
 )
 
-# Unknown commands handler – מסונן כדי לא לבלוע פקודות מוכרות
+# Unknown commands handler
 KNOWN_COMMANDS_PATTERN = (
     r"^/(start|menu|help|ALL|all|myid|groupid|"
     r"positions|position|assign|support|set_expert_group|"
@@ -115,11 +115,8 @@ async def startup_event():
     await application.start()
     print("Bot initialized and started")
 
-    try:
-        sheets_service.init_positions()
-        print("Positions sheet initialized or verified")
-    except Exception as e:
-        print("Error initializing Positions sheet:", e)
+    # init_positions() הוסר — לא קיים יותר בקובץ החדש
+    print("Positions sheet initialization skipped (not required)")
 
 
 @app.post("/webhook")
