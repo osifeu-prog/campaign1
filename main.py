@@ -5,6 +5,8 @@ from telegram.ext import (
     Application,
     CommandHandler,
     CallbackQueryHandler,
+    MessageHandler,
+    filters as tg_filters,
 )
 import uvicorn
 
@@ -78,14 +80,15 @@ application.add_handler(CommandHandler("support", bot_handlers.support))
 # Expert group
 application.add_handler(CommandHandler("set_expert_group", bot_handlers.set_expert_group))
 
-# Expert admin callbacks
+# Admin menu
+application.add_handler(CommandHandler("admin_menu", bot_handlers.admin_menu))
+
+# Expert admin callbacks (אישור/דחייה)
 application.add_handler(
     CallbackQueryHandler(bot_handlers.expert_admin_callback, pattern="^expert_(approve|reject):")
 )
 
-# Menu callbacks & other callbacks are handled inside the ConversationHandler
-# Unknown commands handler – MUST be last
-from telegram.ext import MessageHandler, filters as tg_filters
+# Unknown commands handler – חייב להיות אחרון
 application.add_handler(
     MessageHandler(tg_filters.COMMAND, bot_handlers.unknown_command),
     group=1,
