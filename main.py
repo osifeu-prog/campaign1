@@ -57,7 +57,7 @@ app = FastAPI()
 application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
 # Conversation handler
-application.add_handler(bot_handlers.get_conversation_handler())
+application.add_handler(bot_handlers.get_conversation_handler(), block=False)
 
 # Regular commands
 application.add_handler(CommandHandler("myid", bot_handlers.my_id))
@@ -139,3 +139,4 @@ async def webhook(request: Request):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     uvicorn.run("main:app", host="0.0.0.0", port=port)
+
