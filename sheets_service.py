@@ -17,7 +17,7 @@ from telegram.ext import (
 )
 
 import sheets_service
-from logger_service import log  # שכבת לוגים חכמה
+from bot.logger_service import log
 
 # ============================================
 # ============ ENV & CONSTANTS ===============
@@ -1102,3 +1102,4 @@ def get_conversation_handler() -> ConversationHandler:
         fallbacks=[CommandHandler("cancel", cancel)],
         per_message=False,
     )
+
