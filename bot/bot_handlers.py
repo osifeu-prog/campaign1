@@ -1129,6 +1129,8 @@ async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "לא זיהיתי את הפקודה הזו.\n"
         "נסה /menu כדי לראות את כל האפשרויות."
     )
+
+
 # ============================================
 # ===== CONVERSATION HANDLER FACTORY =========
 # ============================================
@@ -1144,7 +1146,7 @@ def get_conversation_handler() -> ConversationHandler:
             CHOOSING_ROLE: [
                 CallbackQueryHandler(choose_role, pattern="^(supporter|expert)$"),
                 CallbackQueryHandler(handle_menu_callback),
-                CommandHandler("start", start),  # מאפשר להתחיל מחדש
+                CommandHandler("start", start),
             ],
 
             SUPPORTER_NAME: [
@@ -1205,8 +1207,9 @@ def get_conversation_handler() -> ConversationHandler:
 
         fallbacks=[
             CommandHandler("cancel", cancel),
-            CommandHandler("start", start),  # fallback נוסף
+            CommandHandler("start", start),
         ],
 
-        per_message=True,   # ←←← הכי חשוב! מאפשר ל־CallbackQueryHandler לעבוד תמיד
+        allow_reentry=True,
+        per_message=False,
     )
