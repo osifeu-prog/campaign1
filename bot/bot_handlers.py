@@ -17,9 +17,11 @@ from telegram.ext import (
 )
 
 import sheets_service
-from logger_service import log  # שכבת לוגים חכמה
+from bot.logger_service import log  # שכבת לוגים חכמה
 
-# ------------ ENV & CONSTANTS ------------
+# ============================================
+# ============ ENV & CONSTANTS ===============
+# ============================================
 
 LOG_GROUP_ID = os.getenv("LOG_GROUP_ID", "")
 ADMIN_IDS = [i for i in os.getenv("ADMIN_IDS", "").split(",") if i]
@@ -55,9 +57,12 @@ CALLBACK_APPLY_EXPERT = "apply_expert_again"
 CALLBACK_APPLY_SUPPORTER = "apply_supporter"
 CALLBACK_ADMIN_PENDING_EXPERTS = "admin_pending_experts"
 CALLBACK_ADMIN_GROUPS = "admin_groups"
+CALLBACK_ADMIN_SEARCH = "admin_search"
+CALLBACK_ADMIN_BACK = "admin_back"
 
-
-# ------------ SMALL HELPERS ------------
+# ============================================
+# =============== HELPERS ====================
+# ============================================
 
 def is_admin(user_id: int) -> bool:
     return str(user_id) in ADMIN_IDS
@@ -76,46 +81,36 @@ def extract_joined_via_expert(start_param: str) -> str:
     return ""
 
 
+def build_personal_link(bot_username: str, user_id: int) -> str:
+    return f"https://t.me/{bot_username}?start={user_id}"
+
+
+def build_expert_referral_link(bot_username: str, user_id: int) -> str:
+    return f"https://t.me/{bot_username}?start=expert_{user_id}"
+
+
 def build_main_menu_for_user(user_id: int) -> InlineKeyboardMarkup:
     buttons = [
-        [
-            InlineKeyboardButton("🧑‍🎓 הרשמה / פרופיל תומך", callback_data=CALLBACK_MENU_SUPPORT),
-        ],
-        [
-            InlineKeyboardButton("🧠 הגשת מועמדות / פאנל מומחה", callback_data=CALLBACK_MENU_EXPERT),
-        ],
-        [
-            InlineKeyboardButton("📊 רשימת מקומות", callback_data="menu_positions"),
-        ],
-        [
-            InlineKeyboardButton("🆘 תמיכה", callback_data=CALLBACK_MENU_SUPPORT),
-        ],
+        [InlineKeyboardButton("🧑‍🎓 הרשמה / פרופיל תומך", callback_data=CALLBACK_MENU_SUPPORT)],
+        [InlineKeyboardButton("🧠 פאנל מומחה", callback_data=CALLBACK_MENU_EXPERT)],
+        [InlineKeyboardButton("📊 רשימת מקומות", callback_data="menu_positions")],
+        [InlineKeyboardButton("🆘 תמיכה", callback_data=CALLBACK_MENU_SUPPORT)],
     ]
 
     if is_admin(user_id):
-        buttons.append(
-            [InlineKeyboardButton("🛠️ פאנל אדמין", callback_data=CALLBACK_MENU_ADMIN)]
-        )
+        buttons.append([InlineKeyboardButton("🛠️ פאנל אדמין", callback_data=CALLBACK_MENU_ADMIN)])
 
     return InlineKeyboardMarkup(buttons)
 
 
 async def send_main_menu(update: Optional[Update], context: ContextTypes.DEFAULT_TYPE):
-    chat_id = (
-        update.effective_chat.id
-        if update and update.effective_chat
-        else None
-    )
+    chat_id = update.effective_chat.id if update and update.effective_chat else None
     if chat_id is None:
         return
 
     user_id = update.effective_user.id if update.effective_user else 0
 
-    text = (
-        "תפריט ראשי:\n\n"
-        "בחר מה ברצונך לעשות."
-    )
-
+    text = "תפריט ראשי:\n\nבחר מה ברצונך לעשות."
     reply_markup = build_main_menu_for_user(user_id)
 
     if update.callback_query:
@@ -123,13 +118,11 @@ async def send_main_menu(update: Optional[Update], context: ContextTypes.DEFAULT
     else:
         await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
 
-
-# ------------ ENTRY & MENUS ------------
+# ============================================
+# ================= MENU =====================
+# ============================================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    /start – מסך פתיחה + בחירת תפקיד (תומך / מומחה).
-    """
     if update.message and update.message.text.startswith("/start"):
         start_param = parse_start_param(update.message.text)
         context.user_data["start_param"] = start_param
@@ -152,41 +145,25 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     keyboard = [
-        [
-            InlineKeyboardButton("🧠 אני מומחה", callback_data=ROLE_EXPERT),
-            InlineKeyboardButton("🧑‍🎓 אני תומך", callback_data=ROLE_SUPPORTER),
-        ],
-        [
-            InlineKeyboardButton("📋 פתח תפריט ראשי", callback_data=CALLBACK_MENU_MAIN),
-        ],
+        [InlineKeyboardButton("🧠 אני מומחה", callback_data=ROLE_EXPERT),
+         InlineKeyboardButton("🧑‍🎓 אני תומך", callback_data=ROLE_SUPPORTER)],
+        [InlineKeyboardButton("📋 פתח תפריט ראשי", callback_data=CALLBACK_MENU_MAIN)],
     ]
 
     if update.message:
-        await update.message.reply_text(
-            intro_text,
-            reply_markup=InlineKeyboardMarkup(keyboard),
-        )
+        await update.message.reply_text(intro_text, reply_markup=InlineKeyboardMarkup(keyboard))
     else:
-        await update.callback_query.message.reply_text(
-            intro_text,
-            reply_markup=InlineKeyboardMarkup(keyboard),
-        )
+        await update.callback_query.message.reply_text(intro_text, reply_markup=InlineKeyboardMarkup(keyboard))
 
     return CHOOSING_ROLE
 
 
 async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    /menu או /help – פתיחת תפריט ראשי.
-    """
     await log(context, "Menu command", user=update.effective_user)
     await send_main_menu(update, context)
 
 
 async def all_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    /all או /ALL – רשימת פקודות טכנית.
-    """
     await log(context, "All commands requested", user=update.effective_user)
     text = (
         "פקודות זמינות:\n\n"
@@ -198,45 +175,238 @@ async def all_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/positions – רשימת מקומות\n"
         "/position <מספר> – פרטי מקום\n"
         "/assign <מקום> <user_id> – שיוך מקום (אדמין)\n"
+        "/reset_position <מקום> – איפוס מקום (אדמין)\n"
+        "/reset_all_positions – איפוס כל המקומות (אדמין)\n"
+        "/find_user <user_id> – חיפוש משתמש\n"
+        "/find_expert <user_id> – חיפוש מומחה\n"
+        "/find_position <id> – חיפוש מקום\n"
+        "/list_approved_experts – מומחים מאושרים\n"
+        "/list_rejected_experts – מומחים שנדחו\n"
+        "/list_supporters – רשימת תומכים\n"
         "/support <טקסט> – שליחת פנייה לתמיכה\n"
         "/set_expert_group <user_id> <link> – שמירת קישור קבוצה למומחה\n"
-        "/ALL – רשימת כל הפקודות\n"
-        "/admin_menu – פאנל אדמין (אדמינים בלבד)\n"
+        "/admin_menu – פאנל אדמין\n"
     )
     await update.message.reply_text(text)
 
+# ============================================
+# =========== SUPPORTER FLOW =================
+# ============================================
+
+async def choose_role(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    role = query.data
+    context.user_data["role"] = role
+    context.user_data["user_id"] = query.from_user.id
+    context.user_data["username"] = query.from_user.username
+    context.user_data["full_name_telegram"] = query.from_user.full_name
+    context.user_data["created_at"] = datetime.utcnow().isoformat()
+
+    await log(context, "Role chosen", user=query.from_user, extra={
+        "role": role,
+        "created_at": context.user_data["created_at"],
+    })
+
+    if role == ROLE_SUPPORTER:
+        await query.edit_message_text("מה שמך המלא?")
+        return SUPPORTER_NAME
+
+    if role == ROLE_EXPERT:
+        await query.edit_message_text("מה שמך המלא?")
+        return EXPERT_NAME
+
+
+async def supporter_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["supporter_full_name"] = update.message.text.strip()
+    await log(context, "Supporter name entered", user=update.effective_user)
+    await update.message.reply_text("באיזו עיר אתה גר?")
+    return SUPPORTER_CITY
+
+
+async def supporter_city(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["supporter_city"] = update.message.text.strip()
+    await log(context, "Supporter city entered", user=update.effective_user)
+    await update.message.reply_text("כתובת אימייל (אפשר 'דלג'):")
+    return SUPPORTER_EMAIL
+
+
+async def supporter_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    context.user_data["supporter_email"] = "" if text.lower() in ["דלג", "skip"] else text
+
+    await log(context, "Supporter email entered", user=update.effective_user)
+    await update.message.reply_text("מה מספר הטלפון שלך?")
+    return SUPPORTER_PHONE
+
+
+async def supporter_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["supporter_phone"] = update.message.text.strip()
+    await log(context, "Supporter phone entered", user=update.effective_user)
+    await update.message.reply_text("מה גרם לך להצטרף לתנועה?")
+    return SUPPORTER_FEEDBACK
+
+
+async def supporter_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["supporter_feedback"] = update.message.text.strip()
+
+    user_row = {
+        "user_id": context.user_data.get("user_id"),
+        "username": context.user_data.get("username"),
+        "full_name_telegram": context.user_data.get("full_name_telegram"),
+        "role": ROLE_SUPPORTER,
+        "city": context.user_data.get("supporter_city"),
+        "email": context.user_data.get("supporter_email"),
+        "referrer": context.user_data.get("referrer", ""),
+        "joined_via_expert_id": context.user_data.get("joined_via_expert_id", ""),
+        "created_at": context.user_data.get("created_at"),
+    }
+
+    sheets_service.append_user_row(user_row)
+
+    await log(context, "Supporter registered", user=update.effective_user)
+
+    personal_link = build_personal_link(context.bot.username, context.user_data["user_id"])
+
+    text = (
+        "תודה שנרשמת כתומך! 🙌\n\n"
+        "זהו קישור אישי שתוכל לשתף עם חברים ומשפחה:\n"
+        f"{personal_link}\n\n"
+        "מה תרצה לעשות עכשיו?"
+    )
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📣 לשתף את הקישור שלי", url=personal_link)],
+        [InlineKeyboardButton("🧠 להגיש מועמדות כמומחה", callback_data=CALLBACK_APPLY_EXPERT)],
+        [InlineKeyboardButton("📋 פתיחת תפריט ראשי", callback_data=CALLBACK_MENU_MAIN)],
+    ])
+
+    await update.message.reply_text(text, reply_markup=keyboard)
+
+    return ConversationHandler.END
+# ============================================
+# ================== MENU CALLBACKS ==========
+# ============================================
 
 async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user = query.from_user
+    bot_username = context.bot.username
 
+    # ----- תפריט ראשי -----
     if query.data == CALLBACK_MENU_MAIN:
         await log(context, "Open main menu (callback)", user=user)
         await send_main_menu(update, context)
         return
 
+    # ----- תפריט תומך מורחב -----
     if query.data == CALLBACK_MENU_SUPPORT:
         await log(context, "Open supporter menu", user=user)
-        text = (
-            "הרשמה / פרופיל תומך:\n\n"
-            "אם עוד לא נרשמת כתומך – נתחיל עכשיו.\n"
-            "אם כבר נרשמת, תוכל להשתמש בקישור האישי שלך לשיתוף.\n\n"
-            "להתחלת הרשמה מחדש כתומך, שלח /start ובחר 'תומך'."
-        )
-        await query.edit_message_text(text, reply_markup=build_main_menu_for_user(user.id))
+
+        supporter = sheets_service.get_supporter_by_id(str(user.id))
+        personal_link = build_personal_link(bot_username, user.id)
+
+        if supporter:
+            text = (
+                "פרופיל תומך:\n\n"
+                f"שם: {supporter.get('full_name_telegram', user.full_name)}\n"
+                f"עיר: {supporter.get('city', 'לא צויין')}\n"
+                f"אימייל: {supporter.get('email', 'לא צויין')}\n\n"
+                "הקישור האישי שלך לשיתוף:\n"
+                f"{personal_link}\n\n"
+                "מה תרצה לעשות עכשיו?"
+            )
+        else:
+            text = (
+                "עדיין לא נרשמת כתומך.\n\n"
+                "כדי להירשם כתומך:\n"
+                "שלח /start ובחר 'תומך'.\n\n"
+                "אחרי ההרשמה תקבל קישור אישי לשיתוף."
+            )
+
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📣 לשתף את הקישור שלי", url=personal_link)],
+            [InlineKeyboardButton("🧠 להגיש מועמדות כמומחה", callback_data=CALLBACK_MENU_EXPERT)],
+            [InlineKeyboardButton("📋 תפריט ראשי", callback_data=CALLBACK_MENU_MAIN)],
+        ])
+
+        await query.edit_message_text(text, reply_markup=keyboard)
         return
 
+    # ----- תפריט מומחה מורחב -----
     if query.data == CALLBACK_MENU_EXPERT:
         await log(context, "Open expert menu", user=user)
+
+        status = sheets_service.get_expert_status(str(user.id))
+        position = sheets_service.get_expert_position(str(user.id))
+        group_link = sheets_service.get_expert_group_link(str(user.id))
+        referral_link = build_expert_referral_link(bot_username, user.id)
+
+        if status is None:
+            text = (
+                "עדיין לא הגשת מועמדות כמומחה.\n\n"
+                "כדי להגיש מועמדות:\n"
+                "שלח /start ובחר 'מומחה'."
+            )
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🧠 הגשת מועמדות כמומחה", callback_data=CALLBACK_APPLY_EXPERT)],
+                [InlineKeyboardButton("📋 תפריט ראשי", callback_data=CALLBACK_MENU_MAIN)],
+            ])
+            await query.edit_message_text(text, reply_markup=keyboard)
+            return
+
+        status_text_map = {
+            "pending": "ממתין לאישור",
+            "approved": "מאושר",
+            "rejected": "נדחה",
+        }
+        status_text = status_text_map.get(status, status or "לא ידוע")
+        pos_text = position or "לא נבחר"
+
         text = (
             "פאנל מומחה:\n\n"
-            "כאן תוכל להגיש מועמדות כמומחה או לעקוב אחרי הסטטוס שלך.\n\n"
-            "להגשת מועמדות כמומחה – שלח /start ובחר 'מומחה'."
+            f"סטטוס המועמדות שלך: {status_text}\n"
+            f"מקום שבחרת: {pos_text}\n\n"
         )
-        await query.edit_message_text(text, reply_markup=build_main_menu_for_user(user.id))
+
+        if status == "approved":
+            text += (
+                "המועמדות שלך אושרה.\n\n"
+                "קישור הבוט האישי שלך לשיתוף (מומחה):\n"
+                f"{referral_link}\n\n"
+            )
+            if group_link:
+                text += f"קישור לקבוצה שלך:\n{group_link}\n\n"
+            else:
+                text += (
+                    "עדיין לא הוגדר קישור לקבוצה שלך.\n"
+                    "האדמין יכול להגדיר זאת עם:\n"
+                    "/set_expert_group <user_id> <link>\n\n"
+                )
+        elif status == "pending":
+            text += "המועמדות שלך ממתינה לאישור אדמין.\n\n"
+        elif status == "rejected":
+            text += (
+                "המועמדות שלך נדחתה.\n"
+                "תוכל להגיש מועמדות מחדש בכל עת.\n\n"
+            )
+
+        text += "מה תרצה לעשות עכשיו?"
+
+        buttons = []
+        if status == "approved":
+            buttons.append([InlineKeyboardButton("📣 לשתף את הקישור שלי", url=referral_link)])
+        if status in ("rejected", "approved"):
+            buttons.append([InlineKeyboardButton("🧠 הגשת מועמדות מחדש", callback_data=CALLBACK_APPLY_EXPERT)])
+        buttons.append([InlineKeyboardButton("📋 תפריט ראשי", callback_data=CALLBACK_MENU_MAIN)])
+
+        keyboard = InlineKeyboardMarkup(buttons)
+        await query.edit_message_text(text, reply_markup=keyboard)
         return
 
+    # ----- פאנל אדמין -----
     if query.data == CALLBACK_MENU_ADMIN:
         if not is_admin(user.id):
             await query.edit_message_text("אין לך הרשאה לצפות בפאנל האדמין.")
@@ -253,19 +423,31 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
         text = (
             "פאנל אדמין:\n\n"
-            "בחר פעולה:"
+            "פקודות מרכזיות:\n"
+            "/positions – צפייה ברשימת כל המקומות\n"
+            "/position <מספר> – פרטי מקום ספציפי\n"
+            "/assign <מקום> <user_id> – שיוך מקום למשתמש\n"
+            "/reset_position <מספר> – איפוס מקום יחיד\n"
+            "/reset_all_positions – איפוס כל המקומות\n"
+            "/set_expert_group <user_id> <link> – הגדרת קבוצה למומחה\n\n"
+            "כלי חיפוש:\n"
+            "/find_user <user_id>\n"
+            "/find_expert <user_id>\n"
+            "/find_position <id>\n"
+            "/list_approved_experts\n"
+            "/list_rejected_experts\n"
+            "/list_supporters\n"
         )
         await query.edit_message_text(text, reply_markup=keyboard)
         return
 
+    # ----- מומחים ממתינים -----
     if query.data == CALLBACK_ADMIN_PENDING_EXPERTS:
         if not is_admin(user.id):
             await query.edit_message_text("אין לך הרשאה.")
             return
 
         await log(context, "Admin view pending experts", user=user)
-
-        # דורש פונקציה sheets_service.get_experts_pending()
         experts = sheets_service.get_experts_pending()
 
         if not experts:
@@ -304,6 +486,7 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         return
 
+    # ----- מידע על קבוצות -----
     if query.data == CALLBACK_ADMIN_GROUPS:
         if not is_admin(user.id):
             await query.edit_message_text("אין לך הרשאה.")
@@ -328,6 +511,7 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         return
 
+    # ----- apply מחדש -----
     if query.data == CALLBACK_APPLY_EXPERT:
         await log(context, "User chose re-apply expert", user=user)
         await query.edit_message_text("מתחילים מחדש את תהליך המועמדות.\nשלח /start ובחר 'מומחה'.")
@@ -338,6 +522,7 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         await query.edit_message_text("מתחילים מחדש את תהליך ההרשמה.\nשלח /start ובחר 'תומך'.")
         return
 
+    # ----- רשימת מקומות מתוך תפריט -----
     if query.data == "menu_positions":
         positions = sheets_service.get_positions()
         await log(context, "View positions from menu", user=user, extra={
@@ -350,122 +535,9 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         await query.edit_message_text(text, reply_markup=build_main_menu_for_user(user.id))
         return
 
-
-# ------------ SUPPORTER FLOW ------------
-
-async def choose_role(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    role = query.data
-    context.user_data["role"] = role
-    context.user_data["user_id"] = query.from_user.id
-    context.user_data["username"] = query.from_user.username
-    context.user_data["full_name_telegram"] = query.from_user.full_name
-    context.user_data["created_at"] = datetime.utcnow().isoformat()
-
-    await log(context, "Role chosen", user=query.from_user, extra={
-        "role": role,
-        "created_at": context.user_data["created_at"],
-    })
-
-    if role == ROLE_SUPPORTER:
-        await query.edit_message_text("מה שמך המלא?")
-        return SUPPORTER_NAME
-
-    if role == ROLE_EXPERT:
-        await query.edit_message_text("מה שמך המלא?")
-        return EXPERT_NAME
-
-
-async def supporter_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["supporter_full_name"] = update.message.text.strip()
-    await log(context, "Supporter name entered", user=update.effective_user, extra={
-        "full_name": context.user_data["supporter_full_name"]
-    })
-    await update.message.reply_text("באיזו עיר אתה גר?")
-    return SUPPORTER_CITY
-
-
-async def supporter_city(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["supporter_city"] = update.message.text.strip()
-    await log(context, "Supporter city entered", user=update.effective_user, extra={
-        "city": context.user_data["supporter_city"]
-    })
-    await update.message.reply_text("כתובת אימייל (אפשר 'דלג'):")
-    return SUPPORTER_EMAIL
-
-
-async def supporter_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip()
-    context.user_data["supporter_email"] = "" if text.lower() in ["דלג", "skip"] else text
-
-    await log(context, "Supporter email entered", user=update.effective_user, extra={
-        "email": context.user_data["supporter_email"] or "skipped"
-    })
-
-    await update.message.reply_text("מה מספר הטלפון שלך?")
-    return SUPPORTER_PHONE
-
-
-async def supporter_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["supporter_phone"] = update.message.text.strip()
-    await log(context, "Supporter phone entered", user=update.effective_user)
-    await update.message.reply_text("מה גרם לך להצטרף לתנועה?")
-    return SUPPORTER_FEEDBACK
-
-
-async def supporter_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["supporter_feedback"] = update.message.text.strip()
-
-    user_row = {
-        "user_id": context.user_data.get("user_id"),
-        "username": context.user_data.get("username"),
-        "full_name_telegram": context.user_data.get("full_name_telegram"),
-        "role": ROLE_SUPPORTER,
-        "city": context.user_data.get("supporter_city"),
-        "email": context.user_data.get("supporter_email"),
-        "referrer": context.user_data.get("referrer", ""),
-        "joined_via_expert_id": context.user_data.get("joined_via_expert_id", ""),
-        "created_at": context.user_data.get("created_at"),
-    }
-
-    sheets_service.append_user_row(user_row)
-
-    await log(context, "Supporter registered", user=update.effective_user, extra={
-        "city": user_row["city"],
-        "email": user_row["email"],
-        "referrer": user_row["referrer"],
-        "joined_via_expert_id": user_row["joined_via_expert_id"],
-    })
-
-    personal_link = f"https://t.me/{context.bot.username}?start={context.user_data['user_id']}"
-
-    text = (
-        "תודה שנרשמת כתומך! 🙌\n\n"
-        "זהו קישור אישי שתוכל לשתף עם חברים ומשפחה:\n"
-        f"{personal_link}\n\n"
-        "מה תרצה לעשות עכשיו?"
-    )
-
-    keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("📣 לשתף את הקישור שלי", url=personal_link),
-        ],
-        [
-            InlineKeyboardButton("🧠 להגיש מועמדות כמומחה", callback_data=CALLBACK_APPLY_EXPERT),
-        ],
-        [
-            InlineKeyboardButton("📋 פתיחת תפריט ראשי", callback_data=CALLBACK_MENU_MAIN),
-        ],
-    ])
-
-    await update.message.reply_text(text, reply_markup=keyboard)
-
-    return ConversationHandler.END
-
-
-# ------------ EXPERT FLOW ------------
+# ============================================
+# ============ EXPERT FLOW ===================
+# ============================================
 
 async def expert_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["expert_full_name"] = update.message.text.strip()
@@ -599,6 +671,10 @@ async def expert_why(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
+# ============================================
+# ============== ADMIN CALLBACKS =============
+# ============================================
+
 async def expert_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -627,7 +703,7 @@ async def expert_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def notify_expert(context: ContextTypes.DEFAULT_TYPE, user_id: str, approved: bool):
     bot_username = context.bot.username
-    referral_link = f"https://t.me/{bot_username}?start=expert_{user_id}"
+    referral_link = build_expert_referral_link(bot_username, int(user_id))
     group_link = sheets_service.get_expert_group_link(user_id)
 
     if approved:
@@ -647,12 +723,8 @@ async def notify_expert(context: ContextTypes.DEFAULT_TYPE, user_id: str, approv
 
         text += "מה תרצה לעשות עכשיו?"
         keyboard = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("📣 לשתף את הקישור שלי", url=referral_link),
-            ],
-            [
-                InlineKeyboardButton("📋 פתיחת תפריט ראשי", callback_data=CALLBACK_MENU_MAIN),
-            ],
+            [InlineKeyboardButton("📣 לשתף את הקישור שלי", url=referral_link)],
+            [InlineKeyboardButton("📋 פתיחת תפריט ראשי", callback_data=CALLBACK_MENU_MAIN)],
         ])
     else:
         text = (
@@ -661,12 +733,8 @@ async def notify_expert(context: ContextTypes.DEFAULT_TYPE, user_id: str, approv
             "כדי להתחיל מחדש, שלח /start ובחר 'מומחה'."
         )
         keyboard = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("🧠 הגשת מועמדות מחדש", callback_data=CALLBACK_APPLY_EXPERT),
-            ],
-            [
-                InlineKeyboardButton("📋 תפריט ראשי", callback_data=CALLBACK_MENU_MAIN),
-            ],
+            [InlineKeyboardButton("🧠 הגשת מועמדות מחדש", callback_data=CALLBACK_APPLY_EXPERT)],
+            [InlineKeyboardButton("📋 תפריט ראשי", callback_data=CALLBACK_MENU_MAIN)],
         ])
 
     await context.bot.send_message(
@@ -674,9 +742,9 @@ async def notify_expert(context: ContextTypes.DEFAULT_TYPE, user_id: str, approv
         text=text,
         reply_markup=keyboard
     )
-
-
-# ------------ POSITIONS & ADMIN TOOLS ------------
+# ============================================
+# =========== ADMIN COMMANDS =================
+# ============================================
 
 async def list_positions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     positions = sheets_service.get_positions()
@@ -740,17 +808,200 @@ async def assign_position(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("בוצע.")
 
 
-async def my_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await log(context, "my_id requested", user=update.effective_user)
-    await update.message.reply_text(f"Your ID: {update.effective_user.id}")
+async def reset_position_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) not in ADMIN_IDS:
+        await update.message.reply_text("אין לך הרשאה.")
+        return
+
+    args = update.message.text.split()
+    if len(args) < 2:
+        await update.message.reply_text("שימוש: /reset_position <position_id>")
+        return
+
+    position_id = args[1].strip()
+
+    try:
+        sheets_service.reset_position(position_id)
+        await log(context, "Position reset by admin", user=update.effective_user, extra={
+            "position_id": position_id
+        })
+        await update.message.reply_text(f"מקום {position_id} אופס.")
+    except ValueError:
+        await update.message.reply_text("המקום לא נמצא.")
+    except Exception as e:
+        await update.message.reply_text("אירעה שגיאה בעת איפוס המקום.")
+        print("Error in reset_position_cmd:", e)
 
 
-async def group_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await log(context, "group_id requested", user=update.effective_user, extra={
-        "chat_id": update.effective_chat.id
-    })
-    await update.message.reply_text(f"Group ID: {update.effective_chat.id}")
+async def reset_all_positions_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) not in ADMIN_IDS:
+        await update.message.reply_text("אין לך הרשאה.")
+        return
 
+    try:
+        sheets_service.reset_all_positions()
+        await log(context, "All positions reset by admin", user=update.effective_user)
+        await update.message.reply_text("כל המקומות אופסו.")
+    except Exception as e:
+        await update.message.reply_text("אירעה שגיאה בעת איפוס כל המקומות.")
+        print("Error in reset_all_positions_cmd:", e)
+
+
+# ============================================
+# =========== SEARCH COMMANDS ================
+# ============================================
+
+async def find_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) not in ADMIN_IDS:
+        await update.message.reply_text("אין לך הרשאה.")
+        return
+
+    args = update.message.text.split()
+    if len(args) < 2:
+        await update.message.reply_text("שימוש: /find_user <user_id>")
+        return
+
+    user_id = args[1]
+    user = sheets_service.get_supporter_by_id(user_id)
+
+    if not user:
+        await update.message.reply_text("משתמש לא נמצא.")
+        return
+
+    text = (
+        f"משתמש {user_id}:\n"
+        f"שם: {user.get('full_name_telegram', '')}\n"
+        f"עיר: {user.get('city', '')}\n"
+        f"אימייל: {user.get('email', '')}\n"
+        f"מצטרף דרך מומחה: {user.get('joined_via_expert_id', '')}\n"
+    )
+    await update.message.reply_text(text)
+
+
+async def find_expert(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) not in ADMIN_IDS:
+        await update.message.reply_text("אין לך הרשאה.")
+        return
+
+    args = update.message.text.split()
+    if len(args) < 2:
+        await update.message.reply_text("שימוש: /find_expert <user_id>")
+        return
+
+    user_id = args[1]
+    expert = sheets_service.get_expert_by_id(user_id)
+
+    if not expert:
+        await update.message.reply_text("מומחה לא נמצא.")
+        return
+
+    text = (
+        f"מומחה {user_id}:\n"
+        f"שם: {expert.get('expert_full_name', '')}\n"
+        f"תחום: {expert.get('expert_field', '')}\n"
+        f"ניסיון: {expert.get('expert_experience', '')}\n"
+        f"מקום: {expert.get('expert_position', '')}\n"
+        f"סטטוס: {expert.get('status', '')}\n"
+        f"קבוצה: {expert.get('group_link', '')}\n"
+    )
+    await update.message.reply_text(text)
+
+
+async def find_position(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) not in ADMIN_IDS:
+        await update.message.reply_text("אין לך הרשאה.")
+        return
+
+    args = update.message.text.split()
+    if len(args) < 2:
+        await update.message.reply_text("שימוש: /find_position <id>")
+        return
+
+    pos_id = args[1]
+    pos = sheets_service.get_position(pos_id)
+
+    if not pos:
+        await update.message.reply_text("מקום לא נמצא.")
+        return
+
+    text = (
+        f"מקום {pos['position_id']}:\n"
+        f"שם: {pos['title']}\n"
+        f"תיאור: {pos['description']}\n"
+        f"מומחה: {pos['expert_user_id'] or 'אין'}\n"
+        f"תאריך שיוך: {pos['assigned_at'] or '—'}"
+    )
+    await update.message.reply_text(text)
+
+
+async def list_approved_experts(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) not in ADMIN_IDS:
+        await update.message.reply_text("אין לך הרשאה.")
+        return
+
+    experts = sheets_service.get_experts_pending()  # נביא רק pending
+    all_rows = sheets_service._load_experts_rows()
+
+    approved = []
+    for row in all_rows[1:]:
+        if len(row) > 8 and row[8] == "approved":
+            approved.append(row)
+
+    if not approved:
+        await update.message.reply_text("אין מומחים מאושרים.")
+        return
+
+    text = "מומחים מאושרים:\n\n"
+    for row in approved:
+        text += f"{row[1]} – מקום {row[4]}, תחום: {row[2]}\n"
+
+    await update.message.reply_text(text)
+
+
+async def list_rejected_experts(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) not in ADMIN_IDS:
+        await update.message.reply_text("אין לך הרשאה.")
+        return
+
+    all_rows = sheets_service._load_experts_rows()
+
+    rejected = []
+    for row in all_rows[1:]:
+        if len(row) > 8 and row[8] == "rejected":
+            rejected.append(row)
+
+    if not rejected:
+        await update.message.reply_text("אין מומחים שנדחו.")
+        return
+
+    text = "מומחים שנדחו:\n\n"
+    for row in rejected:
+        text += f"{row[1]} – מקום {row[4]}, תחום: {row[2]}\n"
+
+    await update.message.reply_text(text)
+
+
+async def list_supporters(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) not in ADMIN_IDS:
+        await update.message.reply_text("אין לך הרשאה.")
+        return
+
+    rows = sheets_service._load_users_rows()
+
+    if len(rows) < 2:
+        await update.message.reply_text("אין תומכים.")
+        return
+
+    text = "רשימת תומכים:\n\n"
+    for row in rows[1:]:
+        text += f"{row[2]} – {row[0]}\n"
+
+    await update.message.reply_text(text)
+
+
+# ============================================
+# =========== SUPPORT / GROUP SETTING ========
+# ============================================
 
 async def support(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not SUPPORT_GROUP_ID:
@@ -775,7 +1026,6 @@ async def support(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     await log(context, "Support request sent", user=user)
-
     await update.message.reply_text("הפנייה נשלחה לצוות התמיכה. נחזור אליך בהקדם.")
 
 
@@ -818,13 +1068,30 @@ async def admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("↩️ תפריט ראשי", callback_data=CALLBACK_MENU_MAIN)],
     ])
 
-    await update.message.reply_text(
-        "פאנל אדמין:\nבחר פעולה:",
-        reply_markup=keyboard
+    text = (
+        "פאנל אדמין:\n\n"
+        "פקודות מרכזיות:\n"
+        "/positions – צפייה ברשימת כל המקומות\n"
+        "/position <מספר> – פרטי מקום ספציפי\n"
+        "/assign <מקום> <user_id> – שיוך מקום למשתמש\n"
+        "/reset_position <מספר> – איפוס מקום יחיד\n"
+        "/reset_all_positions – איפוס כל המקומות\n"
+        "/set_expert_group <user_id> <link> – הגדרת קבוצה למומחה\n\n"
+        "כלי חיפוש:\n"
+        "/find_user <user_id>\n"
+        "/find_expert <user_id>\n"
+        "/find_position <id>\n"
+        "/list_approved_experts\n"
+        "/list_rejected_experts\n"
+        "/list_supporters\n"
     )
 
+    await update.message.reply_text(text, reply_markup=keyboard)
 
-# ------------ FALLBACKS & UNKNOWN COMMANDS ------------
+
+# ============================================
+# =========== UNKNOWN & CANCEL ===============
+# ============================================
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await log(context, "Conversation cancelled", user=update.effective_user)
@@ -836,19 +1103,18 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    טיפול בפקודות לא מוכרות – שיפור חוויית משתמש.
-    """
     await log(context, "Unknown command", user=update.effective_user, extra={
         "text": update.message.text
     })
     await update.message.reply_text(
-        "לא זיהיתי את הפקודה הזו 🤔\n"
+        "לא זיהיתי את הפקודה הזו.\n"
         "נסה /menu כדי לראות את כל האפשרויות."
     )
 
 
-# ------------ CONVERSATION HANDLER FACTORY ------------
+# ============================================
+# ===== CONVERSATION HANDLER FACTORY =========
+# ============================================
 
 def get_conversation_handler() -> ConversationHandler:
     return ConversationHandler(
@@ -856,49 +1122,19 @@ def get_conversation_handler() -> ConversationHandler:
         states={
             CHOOSING_ROLE: [
                 CallbackQueryHandler(choose_role, pattern="^(supporter|expert)$"),
-                CallbackQueryHandler(handle_menu_callback, pattern="^menu_"),
-                CallbackQueryHandler(handle_menu_callback, pattern=f"^{CALLBACK_MENU_MAIN}$"),
-                CallbackQueryHandler(handle_menu_callback, pattern=f"^{CALLBACK_MENU_SUPPORT}$"),
-                CallbackQueryHandler(handle_menu_callback, pattern=f"^{CALLBACK_MENU_EXPERT}$"),
-                CallbackQueryHandler(handle_menu_callback, pattern=f"^{CALLBACK_MENU_ADMIN}$"),
-                CallbackQueryHandler(handle_menu_callback, pattern=f"^{CALLBACK_APPLY_EXPERT}$"),
-                CallbackQueryHandler(handle_menu_callback, pattern=f"^{CALLBACK_APPLY_SUPPORTER}$"),
-                CallbackQueryHandler(handle_menu_callback, pattern=f"^{CALLBACK_ADMIN_PENDING_EXPERTS}$"),
-                CallbackQueryHandler(handle_menu_callback, pattern=f"^{CALLBACK_ADMIN_GROUPS}$"),
+                CallbackQueryHandler(handle_menu_callback),
             ],
-            SUPPORTER_NAME: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_name)
-            ],
-            SUPPORTER_CITY: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_city)
-            ],
-            SUPPORTER_EMAIL: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_email)
-            ],
-            SUPPORTER_PHONE: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_phone)
-            ],
-            SUPPORTER_FEEDBACK: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_feedback)
-            ],
-            EXPERT_NAME: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, expert_name)
-            ],
-            EXPERT_FIELD: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, expert_field)
-            ],
-            EXPERT_EXPERIENCE: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, expert_experience)
-            ],
-            EXPERT_POSITION: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, expert_position)
-            ],
-            EXPERT_LINKS: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, expert_links)
-            ],
-            EXPERT_WHY: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, expert_why)
-            ],
+            SUPPORTER_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_name)],
+            SUPPORTER_CITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_city)],
+            SUPPORTER_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_email)],
+            SUPPORTER_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_phone)],
+            SUPPORTER_FEEDBACK: [MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_feedback)],
+            EXPERT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, expert_name)],
+            EXPERT_FIELD: [MessageHandler(filters.TEXT & ~filters.COMMAND, expert_field)],
+            EXPERT_EXPERIENCE: [MessageHandler(filters.TEXT & ~filters.COMMAND, expert_experience)],
+            EXPERT_POSITION: [MessageHandler(filters.TEXT & ~filters.COMMAND, expert_position)],
+            EXPERT_LINKS: [MessageHandler(filters.TEXT & ~filters.COMMAND, expert_links)],
+            EXPERT_WHY: [MessageHandler(filters.TEXT & ~filters.COMMAND, expert_why)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
         per_message=False,
