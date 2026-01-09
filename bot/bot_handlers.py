@@ -1,10 +1,6 @@
 import os
 from datetime import datetime
-from telegram import (
-    Update,
-    InlineKeyboardMarkup,
-    InlineKeyboardButton,
-)
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import (
     ContextTypes,
     ConversationHandler,
@@ -15,7 +11,7 @@ from telegram.ext import (
 )
 import sheets_service
 
-# ------------------ ENV / CONFIG ------------------
+# ------------------ ENV ------------------
 
 LOG_GROUP_ID = os.getenv("LOG_GROUP_ID", "")
 ADMIN_IDS = [i for i in os.getenv("ADMIN_IDS", "").split(",") if i]
@@ -46,14 +42,14 @@ ROLE_EXPERT = "expert"
 
 # ------------------ HELPERS ------------------
 
-def _parse_start_param(text: str) -> str:
+def parse_start_param(text: str) -> str:
     parts = text.split(" ", maxsplit=1)
     if len(parts) == 2:
         return parts[1].strip()
     return ""
 
 
-def _extract_joined_via_expert_id(start_param: str) -> str:
+def extract_joined_via_expert(start_param: str) -> str:
     if start_param.startswith("expert_"):
         return start_param.replace("expert_", "", 1)
     return ""
@@ -63,20 +59,18 @@ def _extract_joined_via_expert_id(start_param: str) -> str:
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message and update.message.text.startswith("/start"):
-        start_param = _parse_start_param(update.message.text)
+        start_param = parse_start_param(update.message.text)
         context.user_data["start_param"] = start_param
 
         if start_param and not start_param.startswith("expert_"):
             context.user_data["referrer"] = start_param
 
-        joined_via_expert_id = _extract_joined_via_expert_id(start_param)
-        if joined_via_expert_id:
-            context.user_data["joined_via_expert_id"] = joined_via_expert_id
+        joined = extract_joined_via_expert(start_param)
+        if joined:
+            context.user_data["joined_via_expert_id"] = joined
 
     intro_text = (
-        "???? ??? ?????? *?????*.\n\n"
-        "???? 7.10 ???? ??????? ????? ?????? ???? — ???????, ???????, ??????? ??????.\n"
-        "????? ????? ??? ????? ???? ?????: 121 ??????, ???? ??? ????, ??????? ???? ?????? ????.\n\n"
+        "???? ??? ?????? ?????.\n\n"
         "??? ???? ???????"
     )
 
@@ -91,13 +85,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             intro_text,
             reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode="Markdown",
         )
     else:
         await update.callback_query.message.reply_text(
             intro_text,
             reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode="Markdown",
         )
 
     return CHOOSING_ROLE
@@ -170,7 +162,7 @@ async def supporter_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     await update.message.reply_text(
         "???? ?????? ?????!\n"
-        "??? ????? ???? ????? ???? ?? ?????:\n"
+        "??? ????? ???? ????? ????:\n"
         f"https://t.me/{context.bot.username}?start={context.user_data['user_id']}"
     )
 
@@ -262,8 +254,8 @@ async def expert_why(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if LOG_GROUP_ID:
         keyboard = InlineKeyboardMarkup([
             [
-                InlineKeyboardButton("? ???", callback_data=f"expert_approve:{expert_row['user_id']}"),
-                InlineKeyboardButton("? ???", callback_data=f"expert_reject:{expert_row['user_id']}"),
+                InlineKeyboardButton("?????", callback_data=f"expert_approve:{expert_row['user_id']}"),
+                InlineKeyboardButton("?????", callback_data=f"expert_reject:{expert_row['user_id']}"),
             ]
         ])
 
@@ -299,15 +291,15 @@ async def expert_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
 
     if action == "expert_approve":
         sheets_service.update_expert_status(user_id, "approved")
-        await _notify_expert(context, user_id, True)
+        await notify_expert(context, user_id, True)
         await query.edit_message_text("????.")
     else:
         sheets_service.update_expert_status(user_id, "rejected")
-        await _notify_expert(context, user_id, False)
+        await notify_expert(context, user_id, False)
         await query.edit_message_text("????.")
 
 
-async def _notify_expert(context: ContextTypes.DEFAULT_TYPE, user_id: str, approved: bool):
+async def notify_expert(context: ContextTypes.DEFAULT_TYPE, user_id: str, approved: bool):
     bot_username = context.bot.username
     referral_link = f"https://t.me/{bot_username}?start=expert_{user_id}"
     group_link = sheets_service.get_expert_group_link(user_id)
@@ -315,31 +307,28 @@ async def _notify_expert(context: ContextTypes.DEFAULT_TYPE, user_id: str, appro
     if approved:
         text = (
             "???????? ??? ?????? ?????.\n\n"
-            "??? ????? ???? ????? ??? ?????? ????? ??? ???????? ???:\n"
+            "??? ????? ???? ????? ???:\n"
             f"{referral_link}\n\n"
         )
         if group_link:
-            text += (
-                "???? ????? ?????? ???:\n"
-                f"{group_link}\n"
-            )
+            text += f"????? ?????? ???:\n{group_link}"
         else:
             text += (
                 "????? ?? ????? ????? ?????? ???.\n"
-                "?????? ???? ?????? ??? ???????:\n"
-                "/set_expert_group <user_id> <link>\n"
+                "?????? ???? ?????? ??? ??:\n"
+                "/set_expert_group <user_id> <link>"
             )
     else:
-        text = "???????? ??? ?????? ?? ????? ???? ??."
+        text = "???????? ??? ?????? ?? ?????."
 
     await context.bot.send_message(chat_id=int(user_id), text=text)
 # ------------------ POSITIONS COMMANDS ------------------
 
 async def list_positions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     positions = sheets_service.get_positions()
-    text = "?? ????? ???????:\n\n"
+    text = "????? ???????:\n\n"
     for pos in positions:
-        status = "?? ????" if pos["expert_user_id"] else "? ????"
+        status = "????" if pos["expert_user_id"] else "????"
         text += f"{pos['position_id']}. {pos['title']} — {status}\n"
     await update.message.reply_text(text)
 
@@ -356,10 +345,10 @@ async def position_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     text = (
-        f"?? ???? {pos['position_id']}\n"
+        f"???? {pos['position_id']}\n"
         f"??: {pos['title']}\n"
         f"?????: {pos['description']}\n"
-        f"?????: {pos['expert_user_id'] or '???'}\n"
+        f\"?????: {pos['expert_user_id'] or '???'}\"
     )
     await update.message.reply_text(text)
 
@@ -381,22 +370,16 @@ async def assign_position(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ------------------ SUPPORT / ID HELPERS ------------------
 
 async def my_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        f"Your ID:\n{update.effective_user.id}",
-        parse_mode="Markdown",
-    )
+    await update.message.reply_text(f"Your ID: {update.effective_user.id}")
 
 
 async def group_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        f"Group ID:\n{update.effective_chat.id}",
-        parse_mode="Markdown",
-    )
+    await update.message.reply_text(f"Group ID: {update.effective_chat.id}")
 
 
 async def support(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not SUPPORT_GROUP_ID:
-        await update.message.reply_text("????? ?????? ?? ?????? ??????.")
+        await update.message.reply_text("????? ?????? ?? ??????.")
         return
 
     text = update.message.text.replace("/support", "", 1).strip()
@@ -416,21 +399,21 @@ async def support(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ),
     )
 
-    await update.message.reply_text("?????? ?????. ????.")
+    await update.message.reply_text("?????? ?????.")
 
 
 async def all_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
-        "?? ?????? ??????:\n\n"
-        "/start  ????? ?????\n"
-        "/myid  ???? ?ID ???\n"
-        "/groupid  ???? ?ID ?? ??????\n"
-        "/positions  ????? ??????\n"
-        "/position <????>  ???? ????\n"
-        "/assign <????> <user_id>  ???? ???? (?????)\n"
-        "/support <????>  ????? ????? ????? ??????\n"
-        "/set_expert_group <user_id> <link>  ????? ????? ????? ?????? (?????)\n"
-        "/ALL  ????? ?? ???????\n"
+        "?????? ??????:\n\n"
+        "/start – ????? ?????\n"
+        "/myid – ???? ?-ID ???\n"
+        "/groupid – ???? ?-ID ?? ??????\n"
+        "/positions – ????? ??????\n"
+        "/position <????> – ???? ????\n"
+        "/assign <????> <user_id> – ???? ???? (?????)\n"
+        "/support <????> – ????? ????? ??????\n"
+        "/set_expert_group <user_id> <link> – ????? ????? ????? ??????\n"
+        "/ALL – ????? ?? ???????\n"
     )
     await update.message.reply_text(text)
 
@@ -439,7 +422,7 @@ async def all_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def set_expert_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.message.from_user.id) not in ADMIN_IDS:
-        await update.message.reply_text("??? ?? ????? ?????? ??.")
+        await update.message.reply_text("??? ?? ?????.")
         return
 
     parts = update.message.text.split(maxsplit=2)
@@ -451,15 +434,17 @@ async def set_expert_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
     group_link = parts[2].strip()
 
     sheets_service.update_expert_group_link(expert_user_id, group_link)
-    await update.message.reply_text(f"????? ?????? ?????? {expert_user_id} ????.")
+    await update.message.reply_text("????? ????.")
 
 
-# ------------------ CANCEL + CONVERSATION ------------------
+# ------------------ CANCEL ------------------
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("?????? ?????.")
     return ConversationHandler.END
 
+
+# ------------------ CONVERSATION HANDLER ------------------
 
 def get_conversation_handler():
     return ConversationHandler(
