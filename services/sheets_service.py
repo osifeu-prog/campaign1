@@ -71,13 +71,18 @@ def get_supporter_by_id(user_id: str) -> Optional[Dict]:
 
 
 def clear_user_duplicates() -> int:
+    """
+    מוחק כפילויות בגיליון Users לפי user_id.
+    משאיר את הרשומה האחרונה (לפי created_at אם קיים).
+    מחזיר כמה שורות נמחקו.
+    """
     rows = users_sheet.get_all_records()
     if not rows:
         return 0
 
-    user_rows = {}
-    created_map = {}
-    to_delete = []
+    user_rows: Dict[str, int] = {}
+    created_map: Dict[str, datetime] = {}
+    to_delete_indices: List[int] = []
 
     for idx, row in enumerate(rows, start=2):
         uid = str(row.get("user_id", "")).strip()
@@ -87,22 +92,22 @@ def clear_user_duplicates() -> int:
         created_str = str(row.get("created_at", "")).strip()
         try:
             created_dt = datetime.fromisoformat(created_str)
-        except:
+        except Exception:
             created_dt = datetime.min
 
         if uid not in created_map or created_dt >= created_map[uid]:
             if uid in user_rows:
-                to_delete.append(user_rows[uid])
+                to_delete_indices.append(user_rows[uid])
             created_map[uid] = created_dt
             user_rows[uid] = idx
         else:
-            to_delete.append(idx)
+            to_delete_indices.append(idx)
 
-    to_delete = sorted(set(to_delete), reverse=True)
-    for idx in to_delete:
+    to_delete_indices = sorted(set(to_delete_indices), reverse=True)
+    for idx in to_delete_indices:
         users_sheet.delete_rows(idx)
 
-    return len(to_delete)
+    return len(to_delete_indices)
 
 
 # ============================================================
@@ -110,6 +115,11 @@ def clear_user_duplicates() -> int:
 # ============================================================
 
 def append_expert_row(row: Dict):
+    """
+    סדר העמודות חייב להיות תואם לכותרות:
+    user_id | expert_full_name | expert_field | expert_experience |
+    expert_position | expert_links | expert_why | created_at | status | group_link
+    """
     experts_sheet.append_row([
         row.get("user_id", ""),
         row.get("expert_full_name", ""),
@@ -119,7 +129,7 @@ def append_expert_row(row: Dict):
         row.get("expert_links", ""),
         row.get("expert_why", ""),
         row.get("created_at", ""),
-        "pending",
+        "pending",            # status
         row.get("group_link", ""),
     ])
 
@@ -144,6 +154,7 @@ def update_expert_status(user_id: str, status: str):
     rows = experts_sheet.get_all_records()
     for idx, row in enumerate(rows, start=2):
         if str(row.get("user_id")) == str(user_id):
+            # עמודה 9 = status
             experts_sheet.update_cell(idx, 9, status)
             return
 
@@ -168,6 +179,7 @@ def update_expert_group_link(user_id: str, link: str):
     rows = experts_sheet.get_all_records()
     for idx, row in enumerate(rows, start=2):
         if str(row.get("user_id")) == str(user_id):
+            # עמודה 10 = group_link
             experts_sheet.update_cell(idx, 10, link)
             return
 
@@ -178,13 +190,18 @@ def get_experts_pending() -> List[Dict]:
 
 
 def clear_expert_duplicates() -> int:
+    """
+    מוחק כפילויות בגיליון Experts לפי user_id.
+    משאיר את הרשומה האחרונה (לפי created_at אם קיים).
+    מחזיר כמה שורות נמחקו.
+    """
     rows = experts_sheet.get_all_records()
     if not rows:
         return 0
 
-    user_rows = {}
-    created_map = {}
-    to_delete = []
+    user_rows: Dict[str, int] = {}
+    created_map: Dict[str, datetime] = {}
+    to_delete_indices: List[int] = []
 
     for idx, row in enumerate(rows, start=2):
         uid = str(row.get("user_id", "")).strip()
@@ -194,22 +211,22 @@ def clear_expert_duplicates() -> int:
         created_str = str(row.get("created_at", "")).strip()
         try:
             created_dt = datetime.fromisoformat(created_str)
-        except:
+        except Exception:
             created_dt = datetime.min
 
         if uid not in created_map or created_dt >= created_map[uid]:
             if uid in user_rows:
-                to_delete.append(user_rows[uid])
+                to_delete_indices.append(user_rows[uid])
             created_map[uid] = created_dt
             user_rows[uid] = idx
         else:
-            to_delete.append(idx)
+            to_delete_indices.append(idx)
 
-    to_delete = sorted(set(to_delete), reverse=True)
-    for idx in to_delete:
+    to_delete_indices = sorted(set(to_delete_indices), reverse=True)
+    for idx in to_delete_indices:
         experts_sheet.delete_rows(idx)
 
-    return len(to_delete)
+    return len(to_delete_indices)
 
 
 # ============================================================
@@ -239,6 +256,7 @@ def assign_position(position_id: str, user_id: str, timestamp: str):
     rows = positions_sheet.get_all_records()
     for idx, row in enumerate(rows, start=2):
         if str(row.get("position_id")) == str(position_id):
+            # D = expert_user_id, E = assigned_at
             positions_sheet.update(f"D{idx}:E{idx}", [[user_id, timestamp]])
             return
 
@@ -265,6 +283,9 @@ def reset_all_positions():
 # ============================================================
 
 def get_sheet_info(sheet) -> Dict:
+    """
+    מחזיר מידע בסיסי על גיליון: שם, כותרות, מספר שורות/עמודות.
+    """
     headers = sheet.row_values(1)
     all_values = sheet.get_all_values()
     rows_count = len(all_values)
@@ -279,6 +300,11 @@ def get_sheet_info(sheet) -> Dict:
 
 
 def validate_headers(sheet, expected_headers):
+    """
+    בודק:
+    - שאין כותרות כפולות
+    - שכל הכותרות הנדרשות קיימות
+    """
     headers = sheet.row_values(1)
 
     if len(headers) != len(set(headers)):
@@ -294,6 +320,9 @@ def validate_headers(sheet, expected_headers):
 
 
 def validate_all_sheets():
+    """
+    בדיקת כל הגיליונות בלי תיקון – רק וולידציה.
+    """
     expected_users = [
         "user_id", "username", "full_name_telegram", "role",
         "city", "email", "referrer", "joined_via_expert_id", "created_at"
@@ -322,6 +351,12 @@ def validate_all_sheets():
 # ============================================================
 
 def auto_fix_headers(sheet, expected_headers):
+    """
+    מתקנת כותרות באופן אוטומטי:
+    - כותרות ריקות → unnamed_X
+    - כותרות כפולות → header_2, header_3...
+    - כותרות חסרות → מוסיפה אותן בסוף השורה
+    """
     headers = sheet.row_values(1)
     fixed = []
     seen = set()
@@ -350,6 +385,9 @@ def auto_fix_headers(sheet, expected_headers):
 
 
 def auto_fix_all_sheets():
+    """
+    מפעיל auto_fix_headers על כל הגיליונות לפי רשימות כותרות צפויות.
+    """
     expected_users = [
         "user_id", "username", "full_name_telegram", "role",
         "city", "email", "referrer", "joined_via_expert_id", "created_at"
@@ -371,3 +409,46 @@ def auto_fix_all_sheets():
     auto_fix_headers(positions_sheet, expected_positions)
 
     print("✔ All sheets auto-fixed successfully")
+
+
+# ============================================================
+#  SMART VALIDATION
+# ============================================================
+
+def smart_validate_sheets():
+    """
+    מנגנון תיקוף חכם:
+    1) מנסה validate רגיל
+    2) אם יש בעיה שניתנת לתיקון → מפעיל auto_fix
+    3) מנסה validate שוב
+    4) אם עדיין יש בעיה → זורק שגיאה אמיתית
+    """
+
+    print("🔍 Running Smart Validation...")
+
+    # ניסיון ראשון
+    try:
+        validate_all_sheets()
+        print("✔ Sheets valid on first check")
+        return
+    except Exception as e:
+        print(f"⚠ Validation failed on first attempt: {e}")
+        print("🔧 Attempting auto-fix...")
+
+        try:
+            auto_fix_all_sheets()
+        except Exception as fix_err:
+            print(f"❌ Auto-fix failed: {fix_err}")
+            raise Exception("Auto-fix failed, cannot continue")
+
+    # ניסיון שני אחרי auto-fix
+    try:
+        validate_all_sheets()
+        print("✔ Sheets valid after auto-fix")
+        return
+    except Exception as e:
+        print(f"❌ Validation failed even after auto-fix: {e}")
+        raise Exception(
+            "Critical sheet structure error — cannot auto-fix. "
+            "Please fix the sheet manually."
+        )
