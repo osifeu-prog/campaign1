@@ -10,6 +10,8 @@ from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     CallbackQueryHandler,
+    MessageHandler,
+    filters,
 )
 
 from bot import bot_handlers
@@ -31,11 +33,12 @@ from bot.admin_handlers import (
     list_rejected_experts,
     list_supporters,
     admin_menu,
+    expert_admin_callback,
 )
 from services import sheets_service
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # לדוגמה: https://campaign1-production.up.railway.app/webhook
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # למשל: https://campaign1-production.up.railway.app/webhook
 
 app = FastAPI()
 
@@ -46,7 +49,7 @@ application = (
 )
 
 
-# ---------- Startup ----------
+# ---------- בדיקת ENV ----------
 
 def validate_env():
     if not TOKEN:
@@ -54,6 +57,8 @@ def validate_env():
     if not sheets_service.SPREADSHEET_ID:
         raise Exception("Missing GOOGLE_SHEETS_SPREADSHEET_ID")
 
+
+# ---------- Startup ----------
 
 @app.on_event("startup")
 async def startup_event():
@@ -66,22 +71,19 @@ async def startup_event():
         print("❌ Sheets validation failed:", e)
         raise
 
-    # ConversationHandler
+    # ConversationHandler הראשי
     conv_handler = bot_handlers.get_conversation_handler()
     application.add_handler(conv_handler)
 
-    # Callback של מומחים (approve/reject)
+    # callbacks של תפריטים (menu/support/expert/admin/positions וכו')
     application.add_handler(CallbackQueryHandler(
-        bot_handlers.handle_menu_callback,
-        pattern="^(menu_main|menu_support|menu_expert|menu_admin|apply_expert_again|apply_supporter|admin_pending_experts|admin_groups|menu_positions)$"
+        bot_handlers.handle_menu_callback
     ))
+
+    # callbacks של אישור/דחיית מומחים
     application.add_handler(CallbackQueryHandler(
-        bot_handlers.handle_menu_callback,
-        pattern="^(menu_.*|apply_.*)$"
-    ))
-    application.add_handler(CallbackQueryHandler(
-        bot_handlers.expert_admin_callback,
-        pattern="^expert_(approve|reject):"
+        expert_admin_callback,
+        pattern=r"^expert_(approve|reject):"
     ))
 
     # פקודות כלליות
@@ -113,8 +115,8 @@ async def startup_event():
     application.add_handler(CommandHandler("list_supporters", list_supporters))
     application.add_handler(CommandHandler("admin_menu", admin_menu))
 
-    # Unknown command handler (להוסיף בסוף)
-    application.add_handler(CommandHandler(None, bot_handlers.unknown_command))
+    # Handler לפקודות לא מוכרות – בסוף
+    application.add_handler(MessageHandler(filters.COMMAND, bot_handlers.unknown_command))
 
     await application.initialize()
     await application.start()
