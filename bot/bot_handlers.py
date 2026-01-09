@@ -512,10 +512,10 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         return
 
-    # apply מחדש
+    # apply מחדש / התחלת תהליך מומחה מחדש
     if query.data == CALLBACK_APPLY_EXPERT:
-        await log(context, "User chose re-apply expert", user=user)
-        await query.edit_message_text("מתחילים מחדש את תהליך המועמדות.\nשלח /start ובחר 'מומחה'.")
+        await log(context, "User chose apply expert from menu", user=user)
+        await query.edit_message_text("כדי להגיש מועמדות כמומחה:\nשלח /start ובחר 'מומחה'.")
         return
 
     if query.data == CALLBACK_APPLY_SUPPORTER:
@@ -666,9 +666,16 @@ async def expert_why(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=keyboard,
         )
 
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📋 פתיחת תפריט ראשי", callback_data=CALLBACK_MENU_MAIN)],
+        [InlineKeyboardButton("ℹ️ לראות את פאנל המומחה שלי", callback_data=CALLBACK_MENU_EXPERT)],
+    ])
+
     await update.message.reply_text(
         "תודה! בקשה לאישור נשלחה.\n"
-        "נעדכן אותך כאן ברגע שהבקשה תאושר או תידחה."
+        "נעדכן אותך כאן ברגע שהבקשה תאושר או תידחה.\n\n"
+        "בינתיים, מה תרצה לעשות?",
+        reply_markup=keyboard,
     )
     return ConversationHandler.END
 
@@ -1145,7 +1152,6 @@ def get_conversation_handler() -> ConversationHandler:
 
             CHOOSING_ROLE: [
                 CallbackQueryHandler(choose_role, pattern="^(supporter|expert)$"),
-                CallbackQueryHandler(handle_menu_callback),
                 CommandHandler("start", start),
             ],
 
