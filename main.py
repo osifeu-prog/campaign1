@@ -45,25 +45,20 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
 app = FastAPI()
 
+# Telegram bot application
 application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
+# Handlers
 application.add_handler(bot_handlers.get_conversation_handler())
-
 application.add_handler(CommandHandler("myid", bot_handlers.my_id))
 application.add_handler(CommandHandler("groupid", bot_handlers.group_id))
 application.add_handler(CommandHandler("ALL", bot_handlers.all_commands))
-
 application.add_handler(CommandHandler("positions", bot_handlers.list_positions))
 application.add_handler(CommandHandler("position", bot_handlers.position_details))
 application.add_handler(CommandHandler("assign", bot_handlers.assign_position))
-
 application.add_handler(CommandHandler("support", bot_handlers.support))
-
 application.add_handler(CommandHandler("set_expert_group", bot_handlers.set_expert_group))
-
-application.add_handler(
-    CallbackQueryHandler(bot_handlers.expert_admin_callback, pattern="^expert_")
-)
+application.add_handler(CallbackQueryHandler(bot_handlers.expert_admin_callback, pattern="^expert_"))
 
 
 @app.on_event("startup")
@@ -83,9 +78,19 @@ async def startup_event():
 
 @app.post("/webhook")
 async def webhook(request: Request):
-    data = await request.json()
+    # Telegram sometimes sends updates that are not valid JSON
+    try:
+        data = await request.json()
+    except Exception:
+        return {"status": "ignored"}
+
     update = Update.de_json(data, application.bot)
-    await application.process_update(update)
+
+    try:
+        await application.process_update(update)
+    except Exception as e:
+        print("Error processing update:", e)
+
     return {"status": "ok"}
 
 
