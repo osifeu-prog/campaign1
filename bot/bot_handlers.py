@@ -159,6 +159,8 @@ async def supporter_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     )
 
     return ConversationHandler.END
+
+
 async def expert_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["expert_full_name"] = update.message.text.strip()
     await update.message.reply_text("מה תחום המומחיות שלך?")
@@ -310,6 +312,8 @@ async def notify_expert(context: ContextTypes.DEFAULT_TYPE, user_id: str, approv
         text = "המועמדות שלך כמומחה לא אושרה."
 
     await context.bot.send_message(chat_id=int(user_id), text=text)
+
+
 async def list_positions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     positions = sheets_service.get_positions()
     text = "רשימת המקומות:\n\n"
@@ -450,3 +454,21 @@ def get_conversation_handler():
                 MessageHandler(filters.TEXT & ~filters.COMMAND, expert_name)
             ],
             EXPERT_FIELD: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, expert_field)
+            ],
+            EXPERT_EXPERIENCE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, expert_experience)
+            ],
+            EXPERT_POSITION: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, expert_position)
+            ],
+            EXPERT_LINKS: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, expert_links)
+            ],
+            EXPERT_WHY: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, expert_why)
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+        per_message=False,
+    )
