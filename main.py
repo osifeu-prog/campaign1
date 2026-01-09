@@ -56,45 +56,87 @@ app = FastAPI()
 
 application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
-# Conversation handler
-application.add_handler(bot_handlers.get_conversation_handler(), block=False)
+# ============================================================
+# 1) Regular commands (פקודות רגילות)
+# ============================================================
 
-# Regular commands
-application.add_handler(CommandHandler("myid", bot_handlers.my_id))
-application.add_handler(CommandHandler("groupid", bot_handlers.group_id))
-
-# Menus & help
+application.add_handler(CommandHandler("start", bot_handlers.start))
 application.add_handler(CommandHandler("menu", bot_handlers.menu_command))
 application.add_handler(CommandHandler("help", bot_handlers.menu_command))
 application.add_handler(CommandHandler("ALL", bot_handlers.all_commands))
 application.add_handler(CommandHandler("all", bot_handlers.all_commands))
 
-# Positions & admin tools
+application.add_handler(CommandHandler("myid", bot_handlers.my_id))
+application.add_handler(CommandHandler("groupid", bot_handlers.group_id))
+
+# ============================================================
+# 2) Admin commands
+# ============================================================
+
 application.add_handler(CommandHandler("positions", bot_handlers.list_positions))
 application.add_handler(CommandHandler("position", bot_handlers.position_details))
 application.add_handler(CommandHandler("assign", bot_handlers.assign_position))
 application.add_handler(CommandHandler("reset_position", bot_handlers.reset_position_cmd))
 application.add_handler(CommandHandler("reset_all_positions", bot_handlers.reset_all_positions_cmd))
 
-# Support
-application.add_handler(CommandHandler("support", bot_handlers.support))
+application.add_handler(CommandHandler("find_user", bot_handlers.find_user))
+application.add_handler(CommandHandler("find_expert", bot_handlers.find_expert))
+application.add_handler(CommandHandler("find_position", bot_handlers.find_position))
 
-# Expert group
-application.add_handler(CommandHandler("set_expert_group", bot_handlers.set_expert_group))
+application.add_handler(CommandHandler("list_approved_experts", bot_handlers.list_approved_experts))
+application.add_handler(CommandHandler("list_rejected_experts", bot_handlers.list_rejected_experts))
+application.add_handler(CommandHandler("list_supporters", bot_handlers.list_supporters))
 
-# Admin menu
 application.add_handler(CommandHandler("admin_menu", bot_handlers.admin_menu))
 
-# Expert admin callbacks
+# ============================================================
+# 3) Support & expert group
+# ============================================================
+
+application.add_handler(CommandHandler("support", bot_handlers.support))
+application.add_handler(CommandHandler("set_expert_group", bot_handlers.set_expert_group))
+
+# ============================================================
+# 4) Expert admin callback buttons (approve/reject)
+# ============================================================
+
 application.add_handler(
-    CallbackQueryHandler(bot_handlers.expert_admin_callback, pattern="^expert_(approve|reject):")
+    CallbackQueryHandler(
+        bot_handlers.expert_admin_callback,
+        pattern="^expert_(approve|reject):"
+    )
 )
 
-# Unknown commands handler
+# ============================================================
+# 5) Global callback handler for ALL menu buttons
+# ============================================================
+
+application.add_handler(
+    CallbackQueryHandler(
+        bot_handlers.handle_menu_callback,
+        pattern="^(menu_|apply_|admin_|menu_positions)"
+    )
+)
+
+# ============================================================
+# 6) ConversationHandler — ALWAYS LAST, block=False
+# ============================================================
+
+application.add_handler(
+    bot_handlers.get_conversation_handler(),
+    block=False
+)
+
+# ============================================================
+# 7) Unknown commands handler
+# ============================================================
+
 KNOWN_COMMANDS_PATTERN = (
     r"^/(start|menu|help|ALL|all|myid|groupid|"
     r"positions|position|assign|support|set_expert_group|"
-    r"admin_menu|reset_position|reset_all_positions)"
+    r"admin_menu|reset_position|reset_all_positions|"
+    r"find_user|find_expert|find_position|"
+    r"list_approved_experts|list_rejected_experts|list_supporters)"
     r"(?:@[\w_]+)?\b"
 )
 
@@ -106,6 +148,9 @@ application.add_handler(
     group=1,
 )
 
+# ============================================================
+# 8) Startup
+# ============================================================
 
 @app.on_event("startup")
 async def startup_event():
@@ -114,10 +159,12 @@ async def startup_event():
     await application.initialize()
     await application.start()
     print("Bot initialized and started")
-
-    # init_positions() הוסר — לא קיים יותר בקובץ החדש
     print("Positions sheet initialization skipped (not required)")
 
+
+# ============================================================
+# 9) Webhook
+# ============================================================
 
 @app.post("/webhook")
 async def webhook(request: Request):
@@ -136,7 +183,10 @@ async def webhook(request: Request):
     return {"status": "ok"}
 
 
+# ============================================================
+# 10) Run local server
+# ============================================================
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     uvicorn.run("main:app", host="0.0.0.0", port=port)
-
