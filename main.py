@@ -1,7 +1,11 @@
 import os
 from fastapi import FastAPI, Request
 from telegram import Update
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    CallbackQueryHandler,
+)
 import uvicorn
 
 from bot import bot_handlers
@@ -43,20 +47,49 @@ def validate_env():
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
+if not TELEGRAM_BOT_TOKEN:
+    raise RuntimeError("TELEGRAM_BOT_TOKEN is not set. Cannot start bot.")
+
 app = FastAPI()
 
 application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
+# Conversation handler
 application.add_handler(bot_handlers.get_conversation_handler())
+
+# Regular commands
 application.add_handler(CommandHandler("myid", bot_handlers.my_id))
 application.add_handler(CommandHandler("groupid", bot_handlers.group_id))
+
+# Menus & help
+application.add_handler(CommandHandler("menu", bot_handlers.menu_command))
+application.add_handler(CommandHandler("help", bot_handlers.menu_command))
 application.add_handler(CommandHandler("ALL", bot_handlers.all_commands))
+application.add_handler(CommandHandler("all", bot_handlers.all_commands))
+
+# Positions & admin tools
 application.add_handler(CommandHandler("positions", bot_handlers.list_positions))
 application.add_handler(CommandHandler("position", bot_handlers.position_details))
 application.add_handler(CommandHandler("assign", bot_handlers.assign_position))
+
+# Support
 application.add_handler(CommandHandler("support", bot_handlers.support))
+
+# Expert group
 application.add_handler(CommandHandler("set_expert_group", bot_handlers.set_expert_group))
-application.add_handler(CallbackQueryHandler(bot_handlers.expert_admin_callback, pattern="^expert_"))
+
+# Expert admin callbacks
+application.add_handler(
+    CallbackQueryHandler(bot_handlers.expert_admin_callback, pattern="^expert_(approve|reject):")
+)
+
+# Menu callbacks & other callbacks are handled inside the ConversationHandler
+# Unknown commands handler – MUST be last
+from telegram.ext import MessageHandler, filters as tg_filters
+application.add_handler(
+    MessageHandler(tg_filters.COMMAND, bot_handlers.unknown_command),
+    group=1,
+)
 
 
 @app.on_event("startup")
