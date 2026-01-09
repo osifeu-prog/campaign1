@@ -70,6 +70,49 @@ def get_supporter_by_id(user_id: str) -> Optional[Dict]:
     return None
 
 
+def clear_user_duplicates() -> int:
+    """
+    מוחק כפילויות בגיליון Users לפי user_id:
+    משאיר רק רשומה אחת (האחרונה בזמן created_at אם יש).
+    מחזיר כמה רשומות נמחקו.
+    """
+    rows = users_sheet.get_all_records()
+    if not rows:
+        return 0
+
+    # נבנה מפה: user_id -> row_index_to_keep
+    user_rows: Dict[str, int] = {}
+    created_map: Dict[str, datetime] = {}
+    to_delete_indices: List[int] = []
+
+    for idx, row in enumerate(rows, start=2):
+        uid = str(row.get("user_id", "")).strip()
+        if not uid:
+            continue
+
+        created_str = str(row.get("created_at", "")).strip()
+        try:
+            created_dt = datetime.fromisoformat(created_str)
+        except Exception:
+            created_dt = datetime.min
+
+        if uid not in created_map or created_dt >= created_map[uid]:
+            # אם כבר היה uid קודם – השורה הקודמת הופכת למועמדת למחיקה
+            if uid in user_rows:
+                to_delete_indices.append(user_rows[uid])
+            created_map[uid] = created_dt
+            user_rows[uid] = idx
+        else:
+            to_delete_indices.append(idx)
+
+    # למחוק מהסוף להתחלה כדי לא לשבש אינדקסים
+    to_delete_indices = sorted(set(to_delete_indices), reverse=True)
+    for idx in to_delete_indices:
+        users_sheet.delete_rows(idx)
+
+    return len(to_delete_indices)
+
+
 # ============================================================
 #  EXPERTS
 # ============================================================
@@ -147,6 +190,46 @@ def get_experts_pending() -> List[Dict]:
     return [row for row in rows if row.get("status") == "pending"]
 
 
+def clear_expert_duplicates() -> int:
+    """
+    מוחק כפילויות בגיליון Experts לפי user_id:
+    משאיר רק רשומה אחת (האחרונה בזמן created_at אם יש).
+    מחזיר כמה רשומות נמחקו.
+    """
+    rows = experts_sheet.get_all_records()
+    if not rows:
+        return 0
+
+    user_rows: Dict[str, int] = {}
+    created_map: Dict[str, datetime] = {}
+    to_delete_indices: List[int] = []
+
+    for idx, row in enumerate(rows, start=2):
+        uid = str(row.get("user_id", "")).strip()
+        if not uid:
+            continue
+
+        created_str = str(row.get("created_at", "")).strip()
+        try:
+            created_dt = datetime.fromisoformat(created_str)
+        except Exception:
+            created_dt = datetime.min
+
+        if uid not in created_map or created_dt >= created_map[uid]:
+            if uid in user_rows:
+                to_delete_indices.append(user_rows[uid])
+            created_map[uid] = created_dt
+            user_rows[uid] = idx
+        else:
+            to_delete_indices.append(idx)
+
+    to_delete_indices = sorted(set(to_delete_indices), reverse=True)
+    for idx in to_delete_indices:
+        experts_sheet.delete_rows(idx)
+
+    return len(to_delete_indices)
+
+
 # ============================================================
 #  POSITIONS
 # ============================================================
@@ -189,15 +272,32 @@ def reset_position(position_id: str):
 
 def reset_all_positions():
     rows = positions_sheet.get_all_records()
-    updates = []
-    for idx in range(2, len(rows) + 2):
-        updates.append(["", ""])
+    if not rows:
+        return
+    updates = [["", ""] for _ in rows]
     positions_sheet.update(f"D2:E{len(rows)+1}", updates)
 
 
 # ============================================================
-#  HEADER VALIDATION
+#  SHEET INFO / VALIDATION
 # ============================================================
+
+def get_sheet_info(sheet) -> Dict:
+    """
+    מחזיר מידע בסיסי על גיליון: שם, כותרות, מספר שורות/עמודות.
+    """
+    headers = sheet.row_values(1)
+    all_values = sheet.get_all_values()
+    rows_count = len(all_values)
+    cols_count = max((len(r) for r in all_values), default=0)
+
+    return {
+        "title": sheet.title,
+        "headers": headers,
+        "rows": rows_count,
+        "cols": cols_count,
+    }
+
 
 def validate_headers(sheet, expected_headers):
     headers = sheet.row_values(1)
@@ -243,6 +343,12 @@ def validate_all_sheets():
 # ============================================================
 
 def auto_fix_headers(sheet, expected_headers):
+    """
+    מתקנת כותרות באופן אוטומטי:
+    - כותרות ריקות → unnamed_X
+    - כותרות כפולות → header_2, header_3...
+    - כותרות חסרות → מוסיפה אותן בסוף השורה
+    """
     headers = sheet.row_values(1)
     fixed = []
     seen = set()
