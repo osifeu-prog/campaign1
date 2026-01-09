@@ -57,7 +57,7 @@ app = FastAPI()
 application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
 # ============================================================
-# 1) Regular commands (פקודות רגילות)
+# 1) Regular commands
 # ============================================================
 
 application.add_handler(CommandHandler("start", bot_handlers.start))
@@ -119,12 +119,11 @@ application.add_handler(
 )
 
 # ============================================================
-# 6) ConversationHandler — ALWAYS LAST, block=False
+# 6) ConversationHandler — ALWAYS LAST
 # ============================================================
 
 application.add_handler(
-    bot_handlers.get_conversation_handler(),
-    block=False
+    bot_handlers.get_conversation_handler()
 )
 
 # ============================================================
