@@ -158,7 +158,7 @@ def _log_google_auth_issue(exc: Exception):
         print("❌ Google API error during client initialization:", file=sys.stderr)
         print(f"   {msg}", file=sys.stderr)
 
-def validate_env()::
+def validate_env():
     try:
         if getattr(services.sheets_service, 'sheets_service', None) and getattr(services.sheets_service.sheets_service, '_degraded', False):
             application.bot_data['sheets_degraded'] = True
@@ -481,6 +481,7 @@ try:
 except Exception:
     # If bot_handlers or conv_handler not available at import time, skip and rely on normal flow
     pass
+
 
 
 
