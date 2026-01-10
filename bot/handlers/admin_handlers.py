@@ -30,8 +30,12 @@ from utils.constants import (
     CALLBACK_ADMIN_BROADCAST,
     CALLBACK_ADMIN_EXPORT,
     CALLBACK_ADMIN_QUICK_NAV,
+    CALLBACK_APPLY_EXPERT,
 )
 
+
+def is_admin(user_id: int) -> bool:
+    return str(user_id) in ADMIN_IDS
 
 # ===============================
 # עזר: בדיקת אדמין
