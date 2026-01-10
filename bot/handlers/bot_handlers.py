@@ -1,5 +1,5 @@
 # ===============================
-# bot_handlers – Router ראשי
+# handlers/bot_handlers – Router ראשי
 # ===============================
 
 from telegram import Update
@@ -8,11 +8,10 @@ from telegram.ext import (
     ConversationHandler,
     CommandHandler,
     MessageHandler,
-    CallbackQueryHandler,
     filters,
 )
 
-from bot import supporter_handlers, expert_handlers
+from bot.handlers import supporter_handlers, expert_handlers
 from bot.states import (
     SUPPORTER_NAME,
     SUPPORTER_CITY,
@@ -26,22 +25,11 @@ from bot.states import (
     EXPERT_LINKS,
     EXPERT_WHY,
 )
-from bot.start_flow import handle_start, handle_start_callback
-from bot.menu_flow import handle_menu_command, handle_menu_callback
-from bot.session_manager import session_manager
-from bot.locale_service import locale_service
-from bot.telemetry import telemetry
+from bot.flows.start_flow import handle_start, handle_start_callback
+from bot.flows.menu_flow import handle_menu_command, handle_menu_callback
+from bot.core.locale_service import locale_service
 from services.logger_service import log
-from utils.constants import (
-    CALLBACK_START_SLIDE,
-    CALLBACK_START_SOCI,
-    CALLBACK_START_FINISH,
-)
 
-
-# ===============================
-# פקודות כלליות
-# ===============================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await handle_start(update, context)
@@ -82,17 +70,9 @@ async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(locale_service.t("unknown_command", lang=lang))
 
 
-# ===============================
-# קרוסלת /start – callback handler
-# ===============================
-
 async def handle_start_callback_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await handle_start_callback(update, context)
 
-
-# ===============================
-# ConversationHandler הראשי
-# ===============================
 
 def get_conversation_handler() -> ConversationHandler:
     return ConversationHandler(
