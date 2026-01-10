@@ -10,7 +10,7 @@ from telegram.ext import ContextTypes
 
 from services import sheets_service
 from services.logger_service import log
-from bot.expert_handlers import build_expert_referral_link
+from bot.handlers.expert_handlers import build_expert_referral_link
 from bot.keyboards import build_admin_panel_keyboard, build_admin_sheets_keyboard, build_main_menu_for_user
 from utils.constants import (
     ADMIN_IDS,
