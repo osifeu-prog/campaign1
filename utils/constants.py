@@ -36,14 +36,21 @@ def _parse_admin_ids(raw: str) -> List[str]:
     if not raw or not raw.strip():
         return []
     parts = [p.strip() for p in raw.split(",") if p.strip()]
-    return parts
+    # keep only numeric-looking ids
+    cleaned = []
+    for p in parts:
+        if p.isdigit():
+            cleaned.append(p)
+        else:
+            # try to extract digits
+            digits = "".join(ch for ch in p if ch.isdigit())
+            if digits:
+                cleaned.append(digits)
+    return cleaned
 
 _ADMIN_IDS_RAW = os.getenv("ADMIN_IDS", "")
 ADMIN_IDS = _parse_admin_ids(_ADMIN_IDS_RAW)
 
-# אם רוצים להכריח ADMIN_IDS, אפשר להפעיל ולידציה נוקשה:
-# אם אין ADMIN_IDS מוגדרים, לא נזרוק שגיאה אוטומטית כאן כדי לא לחסום deploy,
-# אך נוכל להדפיס אזהרה.
 if not ADMIN_IDS:
     print("⚠️ Warning: ADMIN_IDS is empty. Some admin-only commands will be unavailable.", file=sys.stderr)
 
@@ -59,8 +66,8 @@ except Exception:
 # ===============================
 # תמונות / משאבים
 # ===============================
-# נתיב יחסי לתיקיית assets (אם קיימת)
-START_IMAGES_DIR = os.path.join(os.path.dirname(__file__), "..", "media", "start_slides")
+import os as _os
+START_IMAGES_DIR = _os.path.join(_os.path.dirname(__file__), "..", "media", "start_slides")
 
 # ===============================
 # Roles / תפקידים
@@ -133,8 +140,21 @@ CALLBACK_EXPERT_REJECT = "expert_reject"
 # ===============================
 # Export / Misc
 # ===============================
-# Default values for other features
 DEFAULT_PAGE_SIZE = int(os.getenv("DEFAULT_PAGE_SIZE", "10"))
+
+# --- image / media settings ---
+IMAGE_SIZES = [(320, 180), (640, 360), (960, 540)]
+TEMP_MEDIA_DIR = os.getenv("TEMP_MEDIA_DIR", "/tmp/campaign1_media")
+
+try:
+    MAX_GIF_DURATION_SECONDS = int(os.getenv("MAX_GIF_DURATION_SECONDS", "10"))
+except Exception:
+    MAX_GIF_DURATION_SECONDS = 10
+
+try:
+    MAX_MEDIA_FILESIZE_MB = int(os.getenv("MAX_MEDIA_FILESIZE_MB", "20"))
+except Exception:
+    MAX_MEDIA_FILESIZE_MB = 20
 
 # ===============================
 # Export list
@@ -191,21 +211,8 @@ __all__ = [
     "CALLBACK_EXPERT_APPROVE",
     "CALLBACK_EXPERT_REJECT",
     "DEFAULT_PAGE_SIZE",
+    "IMAGE_SIZES",
+    "TEMP_MEDIA_DIR",
+    "MAX_GIF_DURATION_SECONDS",
+    "MAX_MEDIA_FILESIZE_MB",
 ]
-# --- image / media settings ---
-# רשימת רזולוציות לבקשתך (width, height)
-IMAGE_SIZES = [(320, 180), (640, 360), (960, 540)]
-
-# תיקיית זמנית לשמירת מדיה לעיבוד
-TEMP_MEDIA_DIR = os.getenv("TEMP_MEDIA_DIR", "/tmp/campaign1_media")
-
-# מגבלות לעיבוד GIF/מדיה
-try:
-    MAX_GIF_DURATION_SECONDS = int(os.getenv("MAX_GIF_DURATION_SECONDS", "10"))
-except Exception:
-    MAX_GIF_DURATION_SECONDS = 10
-
-try:
-    MAX_MEDIA_FILESIZE_MB = int(os.getenv("MAX_MEDIA_FILESIZE_MB", "20"))
-except Exception:
-    MAX_MEDIA_FILESIZE_MB = 20
