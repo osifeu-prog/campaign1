@@ -1,7 +1,7 @@
 import os
 import json
 from datetime import datetime
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 
 import gspread
 from google.oauth2.service_account import Credentials
@@ -27,43 +27,46 @@ gc = gspread.authorize(credentials)
 
 
 # ============================================================
-#  OPEN SHEETS
+#  HELPERS
 # ============================================================
 
 def _open_sheet(name: str):
-    try:
-        sh = gc.open_by_key(SPREADSHEET_ID)
-        return sh.worksheet(name)
-    except Exception as e:
-        print(f"Failed to open sheet {name}: {e}")
-        raise
+    sh = gc.open_by_key(SPREADSHEET_ID)
+    return sh.worksheet(name)
 
 
-users_sheet = _open_sheet(USERS_SHEET_NAME)
-experts_sheet = _open_sheet(EXPERTS_SHEET_NAME)
-positions_sheet = _open_sheet(POSITIONS_SHEET_NAME)
+def get_users_sheet():
+    return _open_sheet(USERS_SHEET_NAME)
+
+
+def get_experts_sheet():
+    return _open_sheet(EXPERTS_SHEET_NAME)
+
+
+def get_positions_sheet():
+    return _open_sheet(POSITIONS_SHEET_NAME)
 
 
 # ============================================================
 #  USERS
 # ============================================================
 
-def append_user_row(row: Dict):
-    users_sheet.append_row([
-        row.get("user_id", ""),
-        row.get("username", ""),
-        row.get("full_name_telegram", ""),
-        row.get("role", ""),
-        row.get("city", ""),
-        row.get("email", ""),
-        row.get("referrer", ""),
-        row.get("joined_via_expert_id", ""),
-        row.get("created_at", ""),
-    ])
+def append_user_row(row: Dict[str, Any]):
+    sheet = get_users_sheet()
+    headers = sheet.row_values(1)
+    # אם יש שדה חדש שלא קיים בכותרות – נוסיף אותו בסוף
+    for key in row.keys():
+        if key not in headers:
+            headers.append(key)
+    sheet.update("1:1", [headers])
+
+    values = [row.get(h, "") for h in headers]
+    sheet.append_row(values)
 
 
 def get_supporter_by_id(user_id: str) -> Optional[Dict]:
-    rows = users_sheet.get_all_records()
+    sheet = get_users_sheet()
+    rows = sheet.get_all_records()
     for row in rows:
         if str(row.get("user_id")) == str(user_id):
             return row
@@ -76,7 +79,8 @@ def clear_user_duplicates() -> int:
     משאיר את הרשומה האחרונה (לפי created_at אם קיים).
     מחזיר כמה שורות נמחקו.
     """
-    rows = users_sheet.get_all_records()
+    sheet = get_users_sheet()
+    rows = sheet.get_all_records()
     if not rows:
         return 0
 
@@ -105,7 +109,7 @@ def clear_user_duplicates() -> int:
 
     to_delete_indices = sorted(set(to_delete_indices), reverse=True)
     for idx in to_delete_indices:
-        users_sheet.delete_rows(idx)
+        sheet.delete_rows(idx)
 
     return len(to_delete_indices)
 
@@ -114,28 +118,48 @@ def clear_user_duplicates() -> int:
 #  EXPERTS
 # ============================================================
 
-def append_expert_row(row: Dict):
+def append_expert_row(row: Dict[str, Any]):
     """
     סדר העמודות חייב להיות תואם לכותרות:
     user_id | expert_full_name | expert_field | expert_experience |
     expert_position | expert_links | expert_why | created_at | status | group_link
     """
-    experts_sheet.append_row([
-        row.get("user_id", ""),
-        row.get("expert_full_name", ""),
-        row.get("expert_field", ""),
-        row.get("expert_experience", ""),
-        row.get("expert_position", ""),
-        row.get("expert_links", ""),
-        row.get("expert_why", ""),
-        row.get("created_at", ""),
-        "pending",            # status
-        row.get("group_link", ""),
-    ])
+    sheet = get_experts_sheet()
+    headers = sheet.row_values(1)
+
+    expected_headers = [
+        "user_id", "expert_full_name", "expert_field", "expert_experience",
+        "expert_position", "expert_links", "expert_why",
+        "created_at", "status", "group_link"
+    ]
+
+    # אם חסרות כותרות – נוסיף
+    for h in expected_headers:
+        if h not in headers:
+            headers.append(h)
+
+    sheet.update("1:1", [headers])
+
+    base_row = {
+        "user_id": row.get("user_id", ""),
+        "expert_full_name": row.get("expert_full_name", ""),
+        "expert_field": row.get("expert_field", ""),
+        "expert_experience": row.get("expert_experience", ""),
+        "expert_position": row.get("expert_position", ""),
+        "expert_links": row.get("expert_links", ""),
+        "expert_why": row.get("expert_why", ""),
+        "created_at": row.get("created_at", ""),
+        "status": row.get("status", "pending"),
+        "group_link": row.get("group_link", ""),
+    }
+
+    values = [base_row.get(h, "") for h in headers]
+    sheet.append_row(values)
 
 
 def get_expert_by_id(user_id: str) -> Optional[Dict]:
-    rows = experts_sheet.get_all_records()
+    sheet = get_experts_sheet()
+    rows = sheet.get_all_records()
     for row in rows:
         if str(row.get("user_id")) == str(user_id):
             return row
@@ -143,49 +167,49 @@ def get_expert_by_id(user_id: str) -> Optional[Dict]:
 
 
 def get_expert_status(user_id: str) -> Optional[str]:
-    rows = experts_sheet.get_all_records()
-    for row in rows:
-        if str(row.get("user_id")) == str(user_id):
-            return row.get("status")
-    return None
+    expert = get_expert_by_id(user_id)
+    if not expert:
+        return None
+    return expert.get("status")
 
 
 def update_expert_status(user_id: str, status: str):
-    rows = experts_sheet.get_all_records()
+    sheet = get_experts_sheet()
+    rows = sheet.get_all_records()
     for idx, row in enumerate(rows, start=2):
         if str(row.get("user_id")) == str(user_id):
             # עמודה 9 = status
-            experts_sheet.update_cell(idx, 9, status)
+            sheet.update_cell(idx, 9, status)
             return
 
 
 def get_expert_position(user_id: str) -> Optional[str]:
-    rows = experts_sheet.get_all_records()
-    for row in rows:
-        if str(row.get("user_id")) == str(user_id):
-            return row.get("expert_position")
-    return None
+    expert = get_expert_by_id(user_id)
+    if not expert:
+        return None
+    return expert.get("expert_position")
 
 
 def get_expert_group_link(user_id: str) -> Optional[str]:
-    rows = experts_sheet.get_all_records()
-    for row in rows:
-        if str(row.get("user_id")) == str(user_id):
-            return row.get("group_link")
-    return None
+    expert = get_expert_by_id(user_id)
+    if not expert:
+        return None
+    return expert.get("group_link")
 
 
 def update_expert_group_link(user_id: str, link: str):
-    rows = experts_sheet.get_all_records()
+    sheet = get_experts_sheet()
+    rows = sheet.get_all_records()
     for idx, row in enumerate(rows, start=2):
         if str(row.get("user_id")) == str(user_id):
             # עמודה 10 = group_link
-            experts_sheet.update_cell(idx, 10, link)
+            sheet.update_cell(idx, 10, link)
             return
 
 
 def get_experts_pending() -> List[Dict]:
-    rows = experts_sheet.get_all_records()
+    sheet = get_experts_sheet()
+    rows = sheet.get_all_records()
     return [row for row in rows if row.get("status") == "pending"]
 
 
@@ -195,7 +219,8 @@ def clear_expert_duplicates() -> int:
     משאיר את הרשומה האחרונה (לפי created_at אם קיים).
     מחזיר כמה שורות נמחקו.
     """
-    rows = experts_sheet.get_all_records()
+    sheet = get_experts_sheet()
+    rows = sheet.get_all_records()
     if not rows:
         return 0
 
@@ -224,7 +249,7 @@ def clear_expert_duplicates() -> int:
 
     to_delete_indices = sorted(set(to_delete_indices), reverse=True)
     for idx in to_delete_indices:
-        experts_sheet.delete_rows(idx)
+        sheet.delete_rows(idx)
 
     return len(to_delete_indices)
 
@@ -234,11 +259,13 @@ def clear_expert_duplicates() -> int:
 # ============================================================
 
 def get_positions() -> List[Dict]:
-    return positions_sheet.get_all_records()
+    sheet = get_positions_sheet()
+    return sheet.get_all_records()
 
 
 def get_position(position_id: str) -> Optional[Dict]:
-    rows = positions_sheet.get_all_records()
+    sheet = get_positions_sheet()
+    rows = sheet.get_all_records()
     for row in rows:
         if str(row.get("position_id")) == str(position_id):
             return row
@@ -249,33 +276,38 @@ def position_is_free(position_id: str) -> bool:
     pos = get_position(position_id)
     if not pos:
         return False
-    return pos.get("expert_user_id") in ("", None)
+    expert_id = str(pos.get("expert_user_id", "")).strip()
+    return expert_id == ""
 
 
 def assign_position(position_id: str, user_id: str, timestamp: str):
-    rows = positions_sheet.get_all_records()
+    sheet = get_positions_sheet()
+    rows = sheet.get_all_records()
     for idx, row in enumerate(rows, start=2):
         if str(row.get("position_id")) == str(position_id):
             # D = expert_user_id, E = assigned_at
-            positions_sheet.update(f"D{idx}:E{idx}", [[user_id, timestamp]])
+            sheet.update(f"D{idx}:E{idx}", [[user_id, timestamp]])
             return
+    raise ValueError("Position not found")
 
 
 def reset_position(position_id: str):
-    rows = positions_sheet.get_all_records()
+    sheet = get_positions_sheet()
+    rows = sheet.get_all_records()
     for idx, row in enumerate(rows, start=2):
         if str(row.get("position_id")) == str(position_id):
-            positions_sheet.update(f"D{idx}:E{idx}", [["", ""]])
+            sheet.update(f"D{idx}:E{idx}", [["", ""]])
             return
     raise ValueError("Position not found")
 
 
 def reset_all_positions():
-    rows = positions_sheet.get_all_records()
+    sheet = get_positions_sheet()
+    rows = sheet.get_all_records()
     if not rows:
         return
     updates = [["", ""] for _ in rows]
-    positions_sheet.update(f"D2:E{len(rows)+1}", updates)
+    sheet.update(f"D2:E{len(rows)+1}", updates)
 
 
 # ============================================================
@@ -323,6 +355,10 @@ def validate_all_sheets():
     """
     בדיקת כל הגיליונות בלי תיקון – רק וולידציה.
     """
+    users_sheet = get_users_sheet()
+    experts_sheet = get_experts_sheet()
+    positions_sheet = get_positions_sheet()
+
     expected_users = [
         "user_id", "username", "full_name_telegram", "role",
         "city", "email", "referrer", "joined_via_expert_id", "created_at"
@@ -388,6 +424,10 @@ def auto_fix_all_sheets():
     """
     מפעיל auto_fix_headers על כל הגיליונות לפי רשימות כותרות צפויות.
     """
+    users_sheet = get_users_sheet()
+    experts_sheet = get_experts_sheet()
+    positions_sheet = get_positions_sheet()
+
     expected_users = [
         "user_id", "username", "full_name_telegram", "role",
         "city", "email", "referrer", "joined_via_expert_id", "created_at"
