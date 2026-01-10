@@ -155,7 +155,13 @@ def _log_google_auth_issue(exc: Exception):
         print("❌ Google API error during client initialization:", file=sys.stderr)
         print(f"   {msg}", file=sys.stderr)
 
-def validate_env():
+def validate_env()
+    try:
+        if getattr(services.sheets_service, 'sheets_service', None) and getattr(services.sheets_service.sheets_service, '_degraded', False):
+            application.bot_data['sheets_degraded'] = True
+            print('⚠ Sheets degraded mode detected at startup')
+    except Exception:
+        pass:
     required_vars = {
         "TELEGRAM_BOT_TOKEN": TOKEN,
         "WEBHOOK_URL": WEBHOOK_URL,
@@ -205,6 +211,12 @@ async def startup_event():
 
     try:
         validate_env()
+    try:
+        if getattr(services.sheets_service, 'sheets_service', None) and getattr(services.sheets_service.sheets_service, '_degraded', False):
+            application.bot_data['sheets_degraded'] = True
+            print('⚠ Sheets degraded mode detected at startup')
+    except Exception:
+        pass
         print("✔ ENV validation passed")
     except Exception as e:
         print(f"❌ ENV validation failed: {e}", file=sys.stderr)
@@ -467,4 +479,5 @@ try:
 except Exception:
     # If bot_handlers or conv_handler not available at import time, skip and rely on normal flow
     pass
+
 
