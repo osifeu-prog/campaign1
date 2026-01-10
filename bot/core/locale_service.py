@@ -1,5 +1,5 @@
 # ===============================
-# locale_service – תמיכה בשפות (כרגע: עברית)
+# core/locale_service – תמיכה בשפות (כרגע: עברית)
 # ===============================
 
 from typing import Literal
@@ -22,10 +22,6 @@ class LocaleService:
         return self.default_lang
 
     def t(self, key: str, lang: LanguageCode = "he") -> str:
-        """
-        מחרוזות טקסט מתורגמות לפי key.
-        כרגע כל הטקסטים בעברית; בהמשך אפשר להוסיף en.
-        """
         he = {
             "start_intro": (
                 "ברוך הבא לתנועת אחדות.\n\n"
@@ -40,7 +36,6 @@ class LocaleService:
 
         if lang == "he":
             return he.get(key, key)
-        # בעתיד: מילון אנגלית
         return he.get(key, key)
 
 
