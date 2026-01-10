@@ -446,25 +446,3 @@ async def root():
         "status": "running",
         "bot": application.bot.username if application.bot else None,
     }
-# Prevent duplicate ConversationHandler registration
-def _conversation_handler_registered(app, handler_type_name="ConversationHandler"):
-    try:
-        for group_handlers in app.handlers.values():
-            for h in group_handlers:
-                if type(h).__name__ == handler_type_name:
-                    return True
-    except Exception:
-        pass
-    return False
-
-# Add conv_handler only if not already registered
-try:
-    conv_handler = bot_handlers.get_conversation_handler()
-    if not _conversation_handler_registered(application):
-        application.add_handler(conv_handler)
-    else:
-        print("✔ ConversationHandler already registered; skipping duplicate registration")
-except Exception:
-    # If bot_handlers or conv_handler not available at import time, skip and rely on normal flow
-    pass
-
