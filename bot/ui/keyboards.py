@@ -24,9 +24,6 @@ from utils.constants import (
 
 
 def build_main_menu_for_user(user_id: int, is_admin: bool) -> InlineKeyboardMarkup:
-    """
-    תפריט ראשי למשתמש: תומך / מומחה / אדמין
-    """
     buttons = [
         [InlineKeyboardButton("🧑‍🎓 הרשמה / פרופיל תומך", callback_data=CALLBACK_MENU_SUPPORT)],
         [InlineKeyboardButton("🧠 פאנל מומחה", callback_data=CALLBACK_MENU_EXPERT)],
@@ -41,9 +38,6 @@ def build_main_menu_for_user(user_id: int, is_admin: bool) -> InlineKeyboardMark
 
 
 def build_start_keyboard() -> InlineKeyboardMarkup:
-    """
-    מקלדת למסך הפתיחה /start
-    """
     buttons = [
         [
             InlineKeyboardButton("🧠 אני מומחה", callback_data="expert"),
@@ -55,9 +49,6 @@ def build_start_keyboard() -> InlineKeyboardMarkup:
 
 
 def build_supporter_profile_keyboard(personal_link: str) -> InlineKeyboardMarkup:
-    """
-    מקלדת למסך 'פרופיל תומך'
-    """
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📣 לשתף את הקישור האישי", url=personal_link)],
         [InlineKeyboardButton("🧠 להגיש מועמדות כמומחה", callback_data=CALLBACK_MENU_EXPERT)],
@@ -66,9 +57,6 @@ def build_supporter_profile_keyboard(personal_link: str) -> InlineKeyboardMarkup
 
 
 def build_expert_panel_keyboard(status: str, referral_link: str | None) -> InlineKeyboardMarkup:
-    """
-    מקלדת למסך 'פאנל מומחה'
-    """
     buttons: list[list[InlineKeyboardButton]] = []
 
     if status == "approved" and referral_link:
@@ -83,9 +71,6 @@ def build_expert_panel_keyboard(status: str, referral_link: str | None) -> Inlin
 
 
 def build_admin_panel_keyboard() -> InlineKeyboardMarkup:
-    """
-    מקלדת לפאנל אדמין ראשי
-    """
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🧑‍⚖️ מומחים ממתינים", callback_data=CALLBACK_ADMIN_PENDING_EXPERTS)],
         [InlineKeyboardButton("📊 רשימת מקומות", callback_data=CALLBACK_MENU_POSITIONS)],
@@ -99,9 +84,6 @@ def build_admin_panel_keyboard() -> InlineKeyboardMarkup:
 
 
 def build_admin_sheets_keyboard() -> InlineKeyboardMarkup:
-    """
-    מקלדת לפעולות על הגיליונות
-    """
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("📊 מידע על הגיליונות", callback_data="admin_sheets_info"),
@@ -117,16 +99,7 @@ def build_admin_sheets_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-# ===============================
-# קרוסלת פתיחה /start
-# ===============================
-
 def build_start_carousel_keyboard(slide_index: int, total_slides: int) -> InlineKeyboardMarkup:
-    """
-    כפתורים לשקופיות פתיחה:
-    - המשך
-    - סוציוקרטיה
-    """
     buttons = []
 
     if slide_index < total_slides - 1:
