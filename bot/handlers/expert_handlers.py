@@ -1,9 +1,5 @@
-# ===============================
-# זרימת מומחה (Expert flow)
-# ===============================
-
+# bot/handlers/expert_handlers.py
 from datetime import datetime
-
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes, ConversationHandler
 
@@ -25,10 +21,8 @@ from utils.constants import (
 from services import sheets_service
 from services.logger_service import log
 
-
 def build_expert_referral_link(bot_username: str, user_id: int) -> str:
     return f"https://t.me/{bot_username}?start=expert_{user_id}"
-
 
 async def expert_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["expert_full_name"] = update.message.text.strip()
@@ -38,7 +32,6 @@ async def expert_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("מה תחום המומחיות שלך?")
     return EXPERT_FIELD
 
-
 async def expert_field(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["expert_field"] = update.message.text.strip()
     await log(context, "Expert field entered", user=update.effective_user, extra={
@@ -47,7 +40,6 @@ async def expert_field(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("ספר בקצרה על הניסיון שלך:")
     return EXPERT_EXPERIENCE
 
-
 async def expert_experience(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["expert_experience"] = update.message.text.strip()
     await log(context, "Expert experience entered", user=update.effective_user, extra={
@@ -55,7 +47,6 @@ async def expert_experience(update: Update, context: ContextTypes.DEFAULT_TYPE):
     })
     await update.message.reply_text(f"על איזה מספר מקום מתוך {MAX_POSITIONS} תרצה להתמודד?")
     return EXPERT_POSITION
-
 
 async def expert_position(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
@@ -94,7 +85,6 @@ async def expert_position(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return EXPERT_LINKS
 
-
 async def expert_links(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["expert_links"] = update.message.text.strip()
     await log(context, "Expert links entered", user=update.effective_user, extra={
@@ -102,7 +92,6 @@ async def expert_links(update: Update, context: ContextTypes.DEFAULT_TYPE):
     })
     await update.message.reply_text("כתוב כמה משפטים עליך:")
     return EXPERT_WHY
-
 
 async def expert_why(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["expert_why"] = update.message.text.strip()
@@ -137,6 +126,7 @@ async def expert_why(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "created_at": context.user_data.get("created_at"),
         "group_link": "",
         "status": "pending",
+        "supporters_count": 0,
     }
 
     sheets_service.append_user_row(user_row)
@@ -178,3 +168,67 @@ async def expert_why(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=keyboard,
     )
     return ConversationHandler.END
+
+# ===============================
+# תמיכה במומחה (callback)
+# ===============================
+
+async def handle_support_expert_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    מטפל בלחיצה על 'תמיכה במומחה זה' מתוך פרופיל מומחה.
+    מניע עדכון supporters_count בגיליון ומונע תמיכה כפולה על ידי אותו משתמש.
+    """
+    query = update.callback_query
+    await query.answer()
+    user = query.from_user
+    data = query.data
+
+    if not data or not data.startswith("support_expert:"):
+        await query.message.reply_text("בקשה לא תקינה.")
+        return
+
+    _, expert_id = data.split(":", 1)
+    # בדיקה אם המומחה קיים ומאושר
+    expert = sheets_service.get_expert_by_id(expert_id)
+    if not expert:
+        await query.message.reply_text("מומחה לא נמצא.")
+        return
+
+    if expert.get("status") != "approved":
+        await query.message.reply_text("לא ניתן לתמוך במומחה שאינו מאושר.")
+        return
+
+    # מניעת תמיכה כפולה: נבדוק בגיליון Users אם המשתמש כבר רשום כתומך עם joined_via_expert_id זה
+    supporter = sheets_service.get_supporter_by_id(str(user.id))
+    if supporter:
+        # אם כבר רשום ותומך במומחה זה — נמנע
+        joined = str(supporter.get("joined_via_expert_id", "") or "")
+        if joined == str(expert_id):
+            await query.message.reply_text("כבר תמכת במומחה זה. תודה רבה!")
+            return
+        # אחרת נעדכן את השורה של המשתמש עם joined_via_expert_id ונגדיל מונה
+        supporter_row = supporter
+        supporter_row["joined_via_expert_id"] = str(expert_id)
+        # נעדכן את השורה בגיליון על ידי הוספת שורה חדשה (append) או עדכון ישיר — כאן נשתמש ב־append_user_row לשמירה עקבית
+        sheets_service.append_user_row(supporter_row)
+    else:
+        # המשתמש לא קיים — נרשום אותו כתומך מינימלי עם joined_via_expert_id
+        new_user = {
+            "user_id": str(user.id),
+            "username": user.username or "",
+            "full_name_telegram": user.full_name or "",
+            "role": "supporter",
+            "city": "",
+            "email": "",
+            "referrer": "",
+            "joined_via_expert_id": str(expert_id),
+            "created_at": datetime.utcnow().isoformat(),
+            "supporter_feedback": "",
+            "phone": "",
+        }
+        sheets_service.append_user_row(new_user)
+
+    # הגדלת מונה תומכים של המומחה
+    sheets_service.increment_expert_supporters(str(expert_id))
+
+    await query.message.reply_text("תודה על התמיכה! מספר התומכים עודכן.")
