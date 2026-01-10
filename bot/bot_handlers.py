@@ -29,6 +29,14 @@ from utils.constants import (
     CALLBACK_ADMIN_PENDING_EXPERTS,
     CALLBACK_ADMIN_GROUPS,
     CALLBACK_MENU_POSITIONS,
+    CALLBACK_ADMIN_SHEETS,
+    CALLBACK_ADMIN_SHEETS_INFO,
+    CALLBACK_ADMIN_SHEETS_FIX,
+    CALLBACK_ADMIN_SHEETS_VALIDATE,
+    CALLBACK_ADMIN_SHEETS_CLEAR_DUP,
+    CALLBACK_ADMIN_BROADCAST,
+    CALLBACK_ADMIN_EXPORT,
+    CALLBACK_ADMIN_QUICK_NAV,
 )
 from bot.states import (
     CHOOSING_ROLE,
@@ -158,23 +166,35 @@ async def all_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await log(context, "All commands requested", user=update.effective_user)
     text = (
         "פקודות זמינות:\n\n"
+        "כללי:\n"
         "/start – התחלת תהליך רישום\n"
         "/menu – תפריט ראשי\n"
         "/help – עזרה\n"
         "/myid – הצגת ה-ID שלך\n"
-        "/groupid – הצגת ה-ID של הקבוצה\n"
+        "/groupid – הצגת ה-ID של הקבוצה\n\n"
+        "מקומות:\n"
         "/positions – רשימת מקומות\n"
         "/position <מספר> – פרטי מקום\n"
         "/assign <מקום> <user_id> – שיוך מקום (אדמין)\n"
         "/reset_position <מקום> – איפוס מקום (אדמין)\n"
-        "/reset_all_positions – איפוס כל המקומות (אדמין)\n"
+        "/reset_all_positions – איפוס כל המקומות (אדמין)\n\n"
+        "שיטס (אדמין):\n"
+        "/sheet_info – מידע על הגיליונות\n"
+        "/validate_sheets – בדיקת תקינות\n"
+        "/fix_sheets – תיקון כותרות\n"
+        "/clear_user_duplicates – ניקוי כפילויות מתומכים\n"
+        "/clear_expert_duplicates – ניקוי כפילויות ממומחים\n\n"
+        "חיפוש / רשימות (אדמין):\n"
         "/find_user <user_id> – חיפוש משתמש\n"
         "/find_expert <user_id> – חיפוש מומחה\n"
         "/find_position <id> – חיפוש מקום\n"
         "/list_approved_experts – מומחים מאושרים\n"
         "/list_rejected_experts – מומחים שנדחו\n"
-        "/list_supporters – רשימת תומכים\n"
-        "/support <טקסט> – שליחת פנייה לתמיכה\n"
+        "/list_supporters – רשימת תומכים\n\n"
+        "שידור (אדמין):\n"
+        "/broadcast_supporters <טקסט> – שידור לתומכים\n"
+        "/broadcast_experts <טקסט> – שידור למומחים\n\n"
+        "ניהול:\n"
         "/set_expert_group <user_id> <link> – שמירת קישור קבוצה למומחה\n"
         "/admin_menu – פאנל אדמין\n"
     )
@@ -289,8 +309,6 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             f"מקום שבחרת: {pos_text}\n\n"
         )
 
-        from telegram import InlineKeyboardButton
-
         if status == "approved":
             text += (
                 "המועמדות שלך אושרה.\n\n"
@@ -327,21 +345,8 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
         await log(context, "Open admin panel", user=user)
         text = (
-            "פאנל אדמין:\n\n"
-            "פקודות מרכזיות:\n"
-            "/positions – צפייה ברשימת כל המקומות\n"
-            "/position <מספר> – פרטי מקום ספציפי\n"
-            "/assign <מקום> <user_id> – שיוך מקום למשתמש\n"
-            "/reset_position <מספר> – איפוס מקום יחיד\n"
-            "/reset_all_positions – איפוס כל המקומות\n"
-            "/set_expert_group <user_id> <link> – הגדרת קבוצה למומחה\n\n"
-            "כלי חיפוש:\n"
-            "/find_user <user_id>\n"
-            "/find_expert <user_id>\n"
-            "/find_position <id>\n"
-            "/list_approved_experts\n"
-            "/list_rejected_experts\n"
-            "/list_supporters\n"
+            "🛠️ פאנל אדמין:\n\n"
+            "באפשרותך להשתמש בפקודות או בכפתורים שלמטה.\n"
         )
         await query.edit_message_text(text, reply_markup=build_admin_panel_keyboard())
         return
@@ -448,6 +453,20 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             status = "תפוס" if pos["expert_user_id"] else "פנוי"
             text += f"{pos['position_id']}. {pos['title']} - {status}\n"
         await query.edit_message_text(text, reply_markup=build_main_menu_for_user(user.id, is_admin(user.id)))
+        return
+
+    # תתי־תפריטים של אדמין (ניהול גיליונות, שידור, יצוא, ניווט מהיר)
+    if query.data in {
+        CALLBACK_ADMIN_SHEETS,
+        CALLBACK_ADMIN_SHEETS_INFO,
+        CALLBACK_ADMIN_SHEETS_FIX,
+        CALLBACK_ADMIN_SHEETS_VALIDATE,
+        CALLBACK_ADMIN_SHEETS_CLEAR_DUP,
+        CALLBACK_ADMIN_BROADCAST,
+        CALLBACK_ADMIN_EXPORT,
+        CALLBACK_ADMIN_QUICK_NAV,
+    }:
+        await admin_handlers.handle_admin_callback(query, context)
         return
 
 
