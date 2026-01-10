@@ -1,5 +1,5 @@
 # ===============================
-# main.py – נקודת כניסה לבוט
+# main.py – נקודת כניסה משודרגת
 # ===============================
 
 import os
@@ -38,20 +38,32 @@ from bot.handlers.admin_handlers import (
     expert_admin_callback,
     broadcast_supporters,
     broadcast_experts,
+    dashboard_command,
+    hourly_stats_command,
+    export_metrics_command,
+    handle_experts_pagination,
+    handle_supporters_pagination,
+    leaderboard_command,
+)
+from bot.handlers.donation_handlers import (
+    handle_donation_callback,
+    check_donation_status,
 )
 from services import sheets_service
 from utils.constants import (
     CALLBACK_START_SLIDE,
     CALLBACK_START_SOCI,
     CALLBACK_START_FINISH,
+    CALLBACK_DONATE,
 )
+from bot.core.monitoring import monitoring
 
 # ===============================
 # ENV
 # ===============================
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # לדוגמה: https://campaign1-production.up.railway.app/webhook
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
 if not TOKEN:
     print("❌ ERROR: Missing TELEGRAM_BOT_TOKEN", file=sys.stderr)
@@ -65,12 +77,12 @@ if not WEBHOOK_URL:
 # FastAPI + Telegram Application
 # ===============================
 
-app = FastAPI()
+app = FastAPI(title="Campaign1 Bot API", version="2.0.0")
 
 application = (
     ApplicationBuilder()
     .token(TOKEN)
-    .concurrent_updates(True)  # יציבות גבוהה יותר בעומס
+    .concurrent_updates(True)
     .build()
 )
 
@@ -80,10 +92,16 @@ application = (
 # ===============================
 
 def validate_env():
-    if not TOKEN:
-        raise Exception("Missing TELEGRAM_BOT_TOKEN")
-    if not sheets_service.SPREADSHEET_ID:
-        raise Exception("Missing GOOGLE_SHEETS_SPREADSHEET_ID")
+    required_vars = {
+        "TELEGRAM_BOT_TOKEN": TOKEN,
+        "WEBHOOK_URL": WEBHOOK_URL,
+        "GOOGLE_SHEETS_SPREADSHEET_ID": sheets_service.SPREADSHEET_ID,
+        "GOOGLE_CREDENTIALS_JSON": os.getenv("GOOGLE_CREDENTIALS_JSON"),
+    }
+    
+    missing = [k for k, v in required_vars.items() if not v]
+    if missing:
+        raise Exception(f"Missing required ENV variables: {', '.join(missing)}")
 
 
 # ===============================
@@ -93,23 +111,18 @@ def validate_env():
 @app.on_event("startup")
 async def startup_event():
     """
-    אתחול הבוט:
-    - בדיקת ENV
-    - Smart Validation לגיליונות
-    - רישום כל ה־handlers
-    - הפעלת הבוט
+    אתחול הבוט המשודרג
     """
-
     print("🚀 Starting bot initialization...")
 
     try:
         validate_env()
+        print("✔ ENV validation passed")
     except Exception as e:
         print(f"❌ ENV validation failed: {e}", file=sys.stderr)
         raise
 
     print("🔍 Running Smart Validation on Google Sheets...")
-
     try:
         sheets_service.smart_validate_sheets()
         print("✔ Sheets validated successfully")
@@ -117,7 +130,6 @@ async def startup_event():
         print("❌ CRITICAL: Smart Validation failed!", file=sys.stderr)
         print(e)
         traceback.print_exc()
-        # לא מפילים את הבוט – מאפשרים לאדמין לתקן דרך הפאנל
         print("⚠️ Continuing startup WITHOUT sheet validation.")
 
     print("🔧 Initializing bot handlers...")
@@ -126,21 +138,37 @@ async def startup_event():
     conv_handler = bot_handlers.get_conversation_handler()
     application.add_handler(conv_handler)
 
-    # --- סדר נכון של CallbackQueryHandlers ---
-
-    # 1) callbacks של אישור/דחיית מומחים
+    # --- Callback handlers בסדר נכון ---
+    
+    # 1) אישור/דחיית מומחים
     application.add_handler(CallbackQueryHandler(
         expert_admin_callback,
         pattern=r"^expert_(approve|reject):"
     ))
-
-    # 2) callbacks של קרוסלת /start
+    
+    # 2) תרומות
     application.add_handler(CallbackQueryHandler(
-        bot_handlers.handle_start_callback,
+        handle_donation_callback,
+        pattern=rf"^{CALLBACK_DONATE}"
+    ))
+    
+    # 3) Pagination
+    application.add_handler(CallbackQueryHandler(
+        handle_experts_pagination,
+        pattern=r"^experts_page:"
+    ))
+    application.add_handler(CallbackQueryHandler(
+        handle_supporters_pagination,
+        pattern=r"^supporters_page:"
+    ))
+    
+    # 4) קרוסלת /start
+    application.add_handler(CallbackQueryHandler(
+        bot_handlers.handle_start_callback_entry,
         pattern=rf"^{CALLBACK_START_SLIDE}:|^{CALLBACK_START_SOCI}$|^{CALLBACK_START_FINISH}$"
     ))
-
-    # 3) כל שאר ה־callbacks של התפריטים
+    
+    # 5) כל שאר ה־callbacks
     application.add_handler(CallbackQueryHandler(
         bot_handlers.handle_menu_callback
     ))
@@ -151,6 +179,7 @@ async def startup_event():
     application.add_handler(CommandHandler("help", bot_handlers.all_commands))
     application.add_handler(CommandHandler("myid", bot_handlers.my_id))
     application.add_handler(CommandHandler("groupid", bot_handlers.group_id))
+    application.add_handler(CommandHandler("leaderboard", leaderboard_command))
 
     # --- פקודות אדמין – מקומות ---
     application.add_handler(CommandHandler("positions", list_positions))
@@ -178,6 +207,14 @@ async def startup_event():
     # --- פקודות אדמין – שידור ---
     application.add_handler(CommandHandler("broadcast_supporters", broadcast_supporters))
     application.add_handler(CommandHandler("broadcast_experts", broadcast_experts))
+    
+    # --- פקודות אדמין – Monitoring ---
+    application.add_handler(CommandHandler("dashboard", dashboard_command))
+    application.add_handler(CommandHandler("hourly_stats", hourly_stats_command))
+    application.add_handler(CommandHandler("export_metrics", export_metrics_command))
+
+    # --- תרומות ---
+    application.add_handler(CommandHandler("check_donation", check_donation_status))
 
     # --- פקודות לא מוכרות ---
     application.add_handler(MessageHandler(filters.COMMAND, bot_handlers.unknown_command))
@@ -185,8 +222,54 @@ async def startup_event():
     # --- הפעלת הבוט ---
     await application.initialize()
     await application.start()
+    
+    # ✅ הגדרת Webhook
+    webhook_path = f"{WEBHOOK_URL}/webhook"
+    try:
+        await application.bot.set_webhook(
+            url=webhook_path,
+            allowed_updates=["message", "callback_query"],
+            drop_pending_updates=True
+        )
+        print(f"✔ Webhook set successfully: {webhook_path}")
+    except Exception as e:
+        print(f"❌ Failed to set webhook: {e}", file=sys.stderr)
+        raise
+
+    # עדכון מטריקות ראשוני
+    monitoring.update_metrics_from_sheets()
+    
+    # הגדרת Cleanup Job
+    from datetime import time
+    application.job_queue.run_daily(
+        cleanup_monitoring_job,
+        time=time(hour=0, minute=5)
+    )
 
     print("🤖 Bot initialized and running!")
+
+
+async def cleanup_monitoring_job(context):
+    """
+    ניקוי נתונים ישנים - רץ פעם ביום
+    """
+    monitoring.cleanup_old_data(days_to_keep=7)
+    print("✔ Monitoring data cleanup completed")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """
+    כיבוי נקי של הבוט
+    """
+    print("🛑 Shutting down bot...")
+    try:
+        await application.bot.delete_webhook(drop_pending_updates=True)
+        await application.stop()
+        await application.shutdown()
+        print("✔ Bot shutdown complete")
+    except Exception as e:
+        print(f"⚠️ Error during shutdown: {e}", file=sys.stderr)
 
 
 # ===============================
@@ -196,14 +279,58 @@ async def startup_event():
 @app.post("/webhook")
 async def telegram_webhook(request: Request):
     """
-    נקודת קצה לקבלת עדכונים מהטלגרם
+    נקודת קצה משופרת לקבלת עדכונים
     """
     try:
         data = await request.json()
         update = Update.de_json(data, application.bot)
-        await application.process_update(update)
+        
+        if update:
+            # מעקב אחרי הודעה
+            if update.message and update.message.from_user:
+                monitoring.track_message(
+                    update.message.from_user.id,
+                    "message"
+                )
+                if update.message.text and update.message.text.startswith("/"):
+                    cmd = update.message.text.split()[0][1:]
+                    monitoring.track_command(cmd)
+            
+            await application.process_update(update)
+            return {"ok": True}
+        else:
+            return {"ok": False, "error": "Invalid update"}
+            
     except Exception as e:
         print("❌ Error processing update:", e, file=sys.stderr)
         traceback.print_exc()
+        monitoring.track_error("webhook_processing", str(e))
+        return {"ok": False, "error": str(e)}
 
-    return {"ok": True}
+
+@app.get("/health")
+async def health_check():
+    """
+    בדיקת בריאות לשימוש Railway
+    """
+    return {
+        "status": "healthy",
+        "bot_username": application.bot.username if application.bot else None,
+        "metrics": {
+            "total_users": monitoring.metrics.total_users,
+            "messages_today": monitoring.metrics.messages_today,
+        }
+    }
+
+
+@app.get("/")
+async def root():
+    """
+    עמוד בית
+    """
+    return {
+        "service": "Campaign1 Bot",
+        "version": "2.0.0",
+        "status": "running",
+        "bot": application.bot.username if application.bot else None,
+    }
