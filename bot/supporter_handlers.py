@@ -25,9 +25,6 @@ PHONE_REGEX = re.compile(r"^[0-9+\-\s]{7,20}$")
 
 
 def build_personal_link(bot_username: str, user_id: int) -> str:
-    """
-    בניית קישור אישי לתומך
-    """
     return f"https://t.me/{bot_username}?start={user_id}"
 
 
@@ -88,7 +85,6 @@ async def supporter_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def supporter_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["supporter_feedback"] = update.message.text.strip()
 
-    # יצירת created_at אם לא קיים
     if "created_at" not in context.user_data:
         context.user_data["created_at"] = datetime.utcnow().isoformat()
 
@@ -102,7 +98,6 @@ async def supporter_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "referrer": context.user_data.get("referrer", ""),
         "joined_via_expert_id": context.user_data.get("joined_via_expert_id", ""),
         "created_at": context.user_data.get("created_at"),
-        # שדה חדש בגיליון (אם תוסיף): feedback
         "feedback": context.user_data.get("supporter_feedback", ""),
         "phone": context.user_data.get("supporter_phone", ""),
     }
