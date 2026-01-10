@@ -51,7 +51,10 @@ from bot.handlers.donation_handlers import (
     handle_copy_wallet_callback,
     handle_ton_info_callback,
 )
-from services import sheets_service
+
+# IMPORTANT: import the sheets_service instance directly from the module
+from services.sheets_service import sheets_service
+
 from utils.constants import (
     CALLBACK_START_SLIDE,
     CALLBACK_START_SOCI,
@@ -145,24 +148,34 @@ def validate_env():
 
     # Try a lightweight initialization of the sheets client to detect auth/permission issues early.
     try:
-        # sheets_service has lazy init; call its internal init to force auth attempt and catch errors.
-        # Use a short timeout pattern: call _init_client and then a harmless API call (get spreadsheet title).
-        sheets_service._init_client()
+        # sheets_service is an instance; call its init method to force auth attempt and catch errors.
+        # The method name in the service is _init_client (instance method).
+        if hasattr(sheets_service, "_init_client"):
+            sheets_service._init_client()
+        else:
+            # defensive fallback: try to call a public method that triggers lazy init
+            try:
+                sheets_service.smart_validate_sheets()
+            except Exception as inner_exc:
+                _log_google_auth_issue(inner_exc)
+                raise
+
         # Try a harmless call to confirm access
         try:
-            # get spreadsheet title or properties (may raise API errors)
-            props = sheets_service._spreadsheet._properties if getattr(sheets_service, "_spreadsheet", None) else None
-            if props:
-                title = props.get("title", "<unknown>")
+            sp = getattr(sheets_service, "_spreadsheet", None)
+            if sp and getattr(sp, "_properties", None):
+                title = sp._properties.get("title", "<unknown>")
                 print(f"✔ Google Sheets access verified for spreadsheet: {title}")
             else:
-                # fallback: try to fetch a sheet list
-                _ = sheets_service._spreadsheet.worksheets()
-                print("✔ Google Sheets access verified (worksheets listed).")
+                # fallback: try to list worksheets (may raise API errors)
+                try:
+                    _ = sheets_service._spreadsheet.worksheets()
+                    print("✔ Google Sheets access verified (worksheets listed).")
+                except Exception as inner_exc:
+                    _log_google_auth_issue(inner_exc)
+                    raise
         except Exception as inner_exc:
-            # Inspect inner exception for 401/403
             _log_google_auth_issue(inner_exc)
-            # Re-raise to stop startup (so operator can fix ENV/permissions)
             raise
     except Exception as e:
         # If any exception occurs during client init, analyze and raise a clear error
