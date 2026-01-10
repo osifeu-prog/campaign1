@@ -1,7 +1,4 @@
-# ===============================
 # main.py – נקודת כניסה משודרגת
-# ===============================
-
 import os
 import sys
 import traceback
@@ -48,6 +45,8 @@ from bot.handlers.admin_handlers import (
 from bot.handlers.donation_handlers import (
     handle_donation_callback,
     check_donation_status,
+    handle_copy_wallet_callback,
+    handle_ton_info_callback,
 )
 from services import sheets_service
 from utils.constants import (
@@ -86,7 +85,6 @@ application = (
     .build()
 )
 
-
 # ===============================
 # בדיקת ENV
 # ===============================
@@ -98,11 +96,9 @@ def validate_env():
         "GOOGLE_SHEETS_SPREADSHEET_ID": sheets_service.SPREADSHEET_ID,
         "GOOGLE_CREDENTIALS_JSON": os.getenv("GOOGLE_CREDENTIALS_JSON"),
     }
-    
     missing = [k for k, v in required_vars.items() if not v]
     if missing:
         raise Exception(f"Missing required ENV variables: {', '.join(missing)}")
-
 
 # ===============================
 # Startup – טעינת הבוט
@@ -110,9 +106,6 @@ def validate_env():
 
 @app.on_event("startup")
 async def startup_event():
-    """
-    אתחול הבוט המשודרג
-    """
     print("🚀 Starting bot initialization...")
 
     try:
@@ -128,7 +121,6 @@ async def startup_event():
         print("✔ Sheets validated successfully")
     except Exception as e:
         print("❌ CRITICAL: Smart Validation failed!", file=sys.stderr)
-        print(e)
         traceback.print_exc()
         print("⚠️ Continuing startup WITHOUT sheet validation.")
 
@@ -139,19 +131,22 @@ async def startup_event():
     application.add_handler(conv_handler)
 
     # --- Callback handlers בסדר נכון ---
-    
+
     # 1) אישור/דחיית מומחים
     application.add_handler(CallbackQueryHandler(
         expert_admin_callback,
         pattern=r"^expert_(approve|reject):"
     ))
-    
+
     # 2) תרומות
     application.add_handler(CallbackQueryHandler(
         handle_donation_callback,
-        pattern=rf"^{CALLBACK_DONATE}"
+        pattern=r"^donate|^CALLBACK_DONATE|^copy_wallet|^ton_info|^menu_main"
     ))
-    
+    # ספציפיים ל־donation callbacks
+    application.add_handler(CallbackQueryHandler(handle_copy_wallet_callback, pattern=r"^copy_wallet$"))
+    application.add_handler(CallbackQueryHandler(handle_ton_info_callback, pattern=r"^ton_info$"))
+
     # 3) Pagination
     application.add_handler(CallbackQueryHandler(
         handle_experts_pagination,
@@ -161,14 +156,14 @@ async def startup_event():
         handle_supporters_pagination,
         pattern=r"^supporters_page:"
     ))
-    
+
     # 4) קרוסלת /start
     application.add_handler(CallbackQueryHandler(
         bot_handlers.handle_start_callback_entry,
         pattern=rf"^{CALLBACK_START_SLIDE}:|^{CALLBACK_START_SOCI}$|^{CALLBACK_START_FINISH}$"
     ))
-    
-    # 5) כל שאר ה־callbacks
+
+    # 5) כל שאר ה־callbacks (menu_flow)
     application.add_handler(CallbackQueryHandler(
         bot_handlers.handle_menu_callback
     ))
@@ -207,7 +202,7 @@ async def startup_event():
     # --- פקודות אדמין – שידור ---
     application.add_handler(CommandHandler("broadcast_supporters", broadcast_supporters))
     application.add_handler(CommandHandler("broadcast_experts", broadcast_experts))
-    
+
     # --- פקודות אדמין – Monitoring ---
     application.add_handler(CommandHandler("dashboard", dashboard_command))
     application.add_handler(CommandHandler("hourly_stats", hourly_stats_command))
@@ -222,7 +217,7 @@ async def startup_event():
     # --- הפעלת הבוט ---
     await application.initialize()
     await application.start()
-    
+
     # ✅ הגדרת Webhook
     webhook_path = f"{WEBHOOK_URL}/webhook"
     try:
@@ -238,7 +233,7 @@ async def startup_event():
 
     # עדכון מטריקות ראשוני
     monitoring.update_metrics_from_sheets()
-    
+
     # הגדרת Cleanup Job
     from datetime import time
     application.job_queue.run_daily(
@@ -248,14 +243,12 @@ async def startup_event():
 
     print("🤖 Bot initialized and running!")
 
-
 async def cleanup_monitoring_job(context):
     """
     ניקוי נתונים ישנים - רץ פעם ביום
     """
     monitoring.cleanup_old_data(days_to_keep=7)
     print("✔ Monitoring data cleanup completed")
-
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -271,7 +264,6 @@ async def shutdown_event():
     except Exception as e:
         print(f"⚠️ Error during shutdown: {e}", file=sys.stderr)
 
-
 # ===============================
 # Webhook endpoint
 # ===============================
@@ -284,7 +276,7 @@ async def telegram_webhook(request: Request):
     try:
         data = await request.json()
         update = Update.de_json(data, application.bot)
-        
+
         if update:
             # מעקב אחרי הודעה
             if update.message and update.message.from_user:
@@ -295,18 +287,17 @@ async def telegram_webhook(request: Request):
                 if update.message.text and update.message.text.startswith("/"):
                     cmd = update.message.text.split()[0][1:]
                     monitoring.track_command(cmd)
-            
+
             await application.process_update(update)
             return {"ok": True}
         else:
             return {"ok": False, "error": "Invalid update"}
-            
+
     except Exception as e:
         print("❌ Error processing update:", e, file=sys.stderr)
         traceback.print_exc()
         monitoring.track_error("webhook_processing", str(e))
         return {"ok": False, "error": str(e)}
-
 
 @app.get("/health")
 async def health_check():
@@ -321,7 +312,6 @@ async def health_check():
             "messages_today": monitoring.metrics.messages_today,
         }
     }
-
 
 @app.get("/")
 async def root():
