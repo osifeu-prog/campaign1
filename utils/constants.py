@@ -1,5 +1,6 @@
 # utils/constants.py
 # קובץ קבועים מרכזי לפרויקט Campaign1
+
 import os
 import sys
 from typing import List
@@ -7,6 +8,7 @@ from typing import List
 # ===============================
 # ENV בסיסיים
 # ===============================
+
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "")
 
@@ -14,15 +16,17 @@ GOOGLE_SHEETS_SPREADSHEET_ID = os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID", "")
 GOOGLE_CREDENTIALS_JSON = os.getenv("GOOGLE_CREDENTIALS_JSON", "")
 
 # ===============================
-# Google Sheets - שמות גיליונות (ברירת מחדל)
+# Google Sheets - שמות גיליונות
 # ===============================
-USERS_SHEET_NAME = os.getenv("USERS_SHEET_NAME", "Users")
+
+USERS_SHEET_NAME = os.getenv("USERS_SHEET_NAME", "Telegram Leads")
 EXPERTS_SHEET_NAME = os.getenv("EXPERTS_SHEET_NAME", "Experts")
 POSITIONS_SHEET_NAME = os.getenv("POSITIONS_SHEET_NAME", "Positions")
 
 # ===============================
 # Telegram Groups / IDs
 # ===============================
+
 LOG_GROUP_ID = os.getenv("LOG_GROUP_ID", "")
 SUPPORT_GROUP_ID = os.getenv("SUPPORT_GROUP_ID", "")
 EXPERTS_GROUP_ID = os.getenv("EXPERTS_GROUP_ID", "")
@@ -32,17 +36,16 @@ ALL_MEMBERS_GROUP_ID = os.getenv("ALL_MEMBERS_GROUP_ID", "")
 # ===============================
 # ADMIN_IDS - ולידציה
 # ===============================
+
 def _parse_admin_ids(raw: str) -> List[str]:
     if not raw or not raw.strip():
         return []
     parts = [p.strip() for p in raw.split(",") if p.strip()]
-    # keep only numeric-looking ids
     cleaned = []
     for p in parts:
         if p.isdigit():
             cleaned.append(p)
         else:
-            # try to extract digits
             digits = "".join(ch for ch in p if ch.isdigit())
             if digits:
                 cleaned.append(digits)
@@ -57,6 +60,7 @@ if not ADMIN_IDS:
 # ===============================
 # TON / Donations
 # ===============================
+
 TON_WALLET_ADDRESS = os.getenv("TON_WALLET_ADDRESS", "")
 try:
     MIN_DONATION_AMOUNT = float(os.getenv("MIN_DONATION_AMOUNT", "1"))
@@ -66,12 +70,14 @@ except Exception:
 # ===============================
 # תמונות / משאבים
 # ===============================
+
 import os as _os
 START_IMAGES_DIR = _os.path.join(_os.path.dirname(__file__), "..", "media", "start_slides")
 
 # ===============================
 # Roles / תפקידים
 # ===============================
+
 ROLE_SUPPORTER = "supporter"
 ROLE_EXPERT = "expert"
 ROLE_ACTIVIST = "activist"
@@ -79,16 +85,18 @@ ROLE_ACTIVIST = "activist"
 # ===============================
 # הגדרות כלליות
 # ===============================
+
 try:
-    MAX_POSITIONS = int(os.getenv("MAX_POSITIONS", "20"))
+    MAX_POSITIONS = int(os.getenv("MAX_POSITIONS", "120"))
 except Exception:
-    MAX_POSITIONS = 20
+    MAX_POSITIONS = 120
 
 DEFAULT_TIMEZONE = os.getenv("DEFAULT_TIMEZONE", "UTC")
 
 # ===============================
 # Callback Data keys
 # ===============================
+
 # Start carousel
 CALLBACK_START_SLIDE = "start_slide"
 CALLBACK_START_SOCI = "start_soci"
@@ -118,31 +126,28 @@ CALLBACK_ADMIN_QUICK_NAV = "admin_quick_nav"
 # Donations
 CALLBACK_DONATE = "donate"
 CALLBACK_DONATE_CUSTOM = "donate_custom"
-# Donation helper callbacks (copy / info)
 CALLBACK_COPY_WALLET = "copy_wallet"
 CALLBACK_TON_INFO = "ton_info"
 
 # Leaderboard / Expert profile
 CALLBACK_LEADERBOARD = "leaderboard"
-CALLBACK_EXPERT_PROFILE = "expert_profile"  # used as prefix: expert_profile:<user_id>
+CALLBACK_EXPERT_PROFILE = "expert_profile"  # prefix: expert_profile:<user_id>
 
 # Help
 CALLBACK_HELP_INFO = "help_info"
 
-# Pagination prefixes
+# Pagination
 CALLBACK_EXPERTS_PAGE = "experts_page"
 CALLBACK_SUPPORTERS_PAGE = "supporters_page"
 
-# Expert admin actions (patterns handled elsewhere)
+# Expert admin actions
 CALLBACK_EXPERT_APPROVE = "expert_approve"
 CALLBACK_EXPERT_REJECT = "expert_reject"
 
 # ===============================
-# Export / Misc
+# Media settings
 # ===============================
-DEFAULT_PAGE_SIZE = int(os.getenv("DEFAULT_PAGE_SIZE", "10"))
 
-# --- image / media settings ---
 IMAGE_SIZES = [(320, 180), (640, 360), (960, 540)]
 TEMP_MEDIA_DIR = os.getenv("TEMP_MEDIA_DIR", "/tmp/campaign1_media")
 
@@ -156,9 +161,12 @@ try:
 except Exception:
     MAX_MEDIA_FILESIZE_MB = 20
 
+DEFAULT_PAGE_SIZE = int(os.getenv("DEFAULT_PAGE_SIZE", "10"))
+
 # ===============================
 # Export list
 # ===============================
+
 __all__ = [
     "TELEGRAM_BOT_TOKEN",
     "WEBHOOK_URL",
