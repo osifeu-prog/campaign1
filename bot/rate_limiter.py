@@ -10,15 +10,7 @@ from typing import Dict, Tuple
 
 
 class RateLimiter:
-    """
-    RateLimiter פשוט ב־in-memory:
-    - event_key: str (למשל "start", "broadcast", "menu")
-    - limit: כמה פעמים מותר
-    - per: טווח זמן בשניות
-    """
-
     def __init__(self):
-        # (user_id, event_key) -> (count, window_start)
         self._counters: Dict[Tuple[int, str], Tuple[int, datetime]] = defaultdict(
             lambda: (0, datetime.utcnow())
         )
@@ -29,7 +21,6 @@ class RateLimiter:
         count, window_start = self._counters[key]
 
         if now - window_start > timedelta(seconds=per_seconds):
-            # reset window
             self._counters[key] = (1, now)
             return True
 
