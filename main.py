@@ -1,7 +1,8 @@
-# main.py – נקודת כניסה משודרגת (מתוקן)
+# main.py – נקודת כניסה משודרגת (מתוקן: webhook path handling + request logging)
 import os
 import sys
 import traceback
+import json
 
 from fastapi import FastAPI, Request
 from telegram import Update
@@ -64,7 +65,7 @@ from bot.core.monitoring import monitoring
 # ===============================
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL", "")
 
 if not TOKEN:
     print("❌ ERROR: Missing TELEGRAM_BOT_TOKEN", file=sys.stderr)
@@ -73,6 +74,16 @@ if not TOKEN:
 if not WEBHOOK_URL:
     print("❌ ERROR: Missing WEBHOOK_URL", file=sys.stderr)
     raise SystemExit(1)
+
+# Normalize WEBHOOK_URL: ensure it does not end with a trailing slash
+WEBHOOK_URL = WEBHOOK_URL.rstrip("/")
+
+# If the provided WEBHOOK_URL already contains '/webhook' at the end, use it as-is.
+# Otherwise append '/webhook' so the final webhook path is consistent with FastAPI route.
+if WEBHOOK_URL.endswith("/webhook"):
+    final_webhook_url = WEBHOOK_URL
+else:
+    final_webhook_url = f"{WEBHOOK_URL}/webhook"
 
 # ===============================
 # FastAPI + Telegram Application
@@ -221,14 +232,13 @@ async def startup_event():
     await application.start()
 
     # ✅ הגדרת Webhook
-    webhook_path = f"{WEBHOOK_URL}/webhook"
     try:
         await application.bot.set_webhook(
-            url=webhook_path,
+            url=final_webhook_url,
             allowed_updates=["message", "callback_query"],
             drop_pending_updates=True
         )
-        print(f"✔ Webhook set successfully: {webhook_path}")
+        print(f"✔ Webhook set successfully: {final_webhook_url}")
     except Exception as e:
         print(f"❌ Failed to set webhook: {e}", file=sys.stderr)
         raise
@@ -280,9 +290,16 @@ async def shutdown_event():
 @app.post("/webhook")
 async def telegram_webhook(request: Request):
     """
-    נקודת קצה משופרת לקבלת עדכונים
+    נקודת קצה לקבלת עדכונים מ‑Telegram.
+    מוסיף לוגינג של ה‑payload כדי לאבחן בעיות חיבור.
     """
     try:
+        raw = await request.body()
+        text = raw.decode("utf-8") if raw else ""
+        # לוג בסיסי של ה‑payload (לא מדפיסים יותר מדי כדי לא לחרוג מגבולות)
+        print("🔔 Incoming webhook payload (truncated 200 chars):")
+        print(text[:200])
+
         data = await request.json()
         update = Update.de_json(data, application.bot)
 
