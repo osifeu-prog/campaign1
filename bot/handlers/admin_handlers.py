@@ -1,5 +1,6 @@
+# bot/handlers/admin_handlers.py
 # ===============================
-# admin_handlers – פאנל אדמין, חיפוש, רשימות, שידור
+# admin_handlers – פאנל אדמין, חיפוש, רשימות, שידור, Leaderboard, pagination
 # ===============================
 
 from datetime import datetime
@@ -14,7 +15,9 @@ from bot.handlers.expert_handlers import build_expert_referral_link
 from bot.ui.keyboards import (
     build_admin_panel_keyboard,
     build_admin_sheets_keyboard,
-    build_main_menu_for_user
+    build_main_menu_for_user,
+    build_leaderboard_keyboard,
+    build_expert_profile_keyboard,
 )
 from utils.constants import (
     ADMIN_IDS,
@@ -31,15 +34,9 @@ from utils.constants import (
     CALLBACK_ADMIN_EXPORT,
     CALLBACK_ADMIN_QUICK_NAV,
     CALLBACK_APPLY_EXPERT,
+    LOG_GROUP_ID,
 )
 
-
-def is_admin(user_id: int) -> bool:
-    return str(user_id) in ADMIN_IDS
-
-# ===============================
-# עזר: בדיקת אדמין
-# ===============================
 
 def is_admin(user_id: int) -> bool:
     return str(user_id) in ADMIN_IDS
@@ -558,7 +555,7 @@ async def admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_admin_callback(query, context: ContextTypes.DEFAULT_TYPE):
     """
-    נקודת ריכוז ל־callbacks של אדמין שלא קשורים למומחים ממתינים (אותם מטפלים ב־bot_handlers).
+    נקודת ריכוז ל־callbacks של אדמין שלא קשורים למומחים ממתינים (אותם מטפלים ב־expert_admin_callback).
     """
     user = query.from_user
 
@@ -665,7 +662,7 @@ async def handle_admin_callback(query, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text, reply_markup=build_admin_panel_keyboard())
         return
 
-    # יצוא נתונים – טקסט
+    # יצוא נתונים
     if data == CALLBACK_ADMIN_EXPORT:
         users_sheet = sheets_service.get_users_sheet()
         experts_sheet = sheets_service.get_experts_sheet()
@@ -706,6 +703,10 @@ async def handle_admin_callback(query, context: ContextTypes.DEFAULT_TYPE):
         )
         await query.edit_message_text(text, reply_markup=build_admin_panel_keyboard())
         return
+
+    # ברירת מחדל: לא מזוהה
+    await query.edit_message_text("פעולה לא מזוהה בתפריט האדמין.", reply_markup=build_admin_panel_keyboard())
+    return
 
 
 # ===============================
@@ -766,3 +767,144 @@ async def broadcast_experts(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await log(context, "Broadcast to experts", user=user, extra={"text": text})
     except Exception as e:
         await update.message.reply_text(f"❌ שגיאה בשליחה: {e}")
+
+
+# ===============================
+# Leaderboard / pagination / helpers
+# ===============================
+
+async def leaderboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    await log(context, "Leaderboard command", user=user)
+    leaders = sheets_service.get_experts_leaderboard()
+    if not leaders:
+        await update.message.reply_text("אין מומחים בדירוג כרגע.")
+        return
+
+    text = "🏆 טבלת מובילים - מומחים לפי מספר תומכים:\n\n"
+    for idx, row in enumerate(leaders, start=1):
+        name = row.get("expert_full_name", "—")
+        pos = row.get("expert_position", "—")
+        supporters = row.get("supporters_count", 0)
+        uid = row.get("user_id", "")
+        text += f"{idx}. {name} — מקום {pos} — תומכים: {supporters} — /expert_{uid}\n"
+
+    text += "\nכדי לצפות בפרופיל מומחה, שלח /expert_<user_id> (לדוגמה: /expert_123456)."
+    await update.message.reply_text(text)
+
+
+async def handle_experts_pagination(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    # דוגמה: experts_page:1
+    try:
+        _, page_str = data.split(":", 1)
+        page = int(page_str)
+    except Exception:
+        page = 0
+
+    leaders = sheets_service.get_experts_leaderboard()
+    per_page = 10
+    start = page * per_page
+    page_items = leaders[start:start+per_page]
+    text = f"🏆 טבלת מובילים - עמוד {page+1}:\n\n"
+    for idx, row in enumerate(page_items, start=start+1):
+        text += f"{idx}. {row.get('expert_full_name','—')} — תומכים: {row.get('supporters_count',0)}\n"
+
+    # כפתורי ניווט פשוטים
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton("◀️ הקודם", callback_data=f"experts_page:{page-1}"))
+    nav_buttons.append(InlineKeyboardButton(f"• {page+1} •", callback_data="page_info"))
+    if start + per_page < len(leaders):
+        nav_buttons.append(InlineKeyboardButton("הבא ▶️", callback_data=f"experts_page:{page+1}"))
+
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup([nav_buttons]))
+
+
+async def handle_supporters_pagination(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    try:
+        _, page_str = data.split(":", 1)
+        page = int(page_str)
+    except Exception:
+        page = 0
+
+    sheet = sheets_service.get_users_sheet()
+    rows = sheet.get_all_records()
+    per_page = 10
+    start = page * per_page
+    page_items = rows[start:start+per_page]
+    text = f"🧑‍🎓 רשימת תומכים - עמוד {page+1}:\n\n"
+    for r in page_items:
+        text += f"{r.get('full_name_telegram','—')} — {r.get('user_id','')}\n"
+
+    buttons = []
+    if page > 0:
+        buttons.append(InlineKeyboardButton("◀️ הקודם", callback_data=f"supporters_page:{page-1}"))
+    buttons.append(InlineKeyboardButton(f"• {page+1} •", callback_data="page_info"))
+    if start + per_page < len(rows):
+        buttons.append(InlineKeyboardButton("הבא ▶️", callback_data=f"supporters_page:{page+1}"))
+
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup([buttons]))
+
+
+# ===============================
+# Monitoring / Dashboard placeholders
+# ===============================
+# הפקודות האלו מיועדות לשימוש עם המודול monitoring; אם תרצה הרחבה, אפשר להוסיף דוחות מפורטים.
+
+async def dashboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not is_admin(user.id):
+        await update.message.reply_text("אין לך הרשאה.")
+        return
+
+    # מידע בסיסי מתוך sheets_service
+    users_sheet = sheets_service.get_users_sheet()
+    experts_sheet = sheets_service.get_experts_sheet()
+    users_count = len(users_sheet.get_all_records() or [])
+    experts_count = len(experts_sheet.get_all_records() or [])
+    leaders = sheets_service.get_experts_leaderboard()
+
+    text = (
+        "📊 Dashboard – נתוני מערכת:\n\n"
+        f"מספר תומכים (שורות Users): {users_count}\n"
+        f"מספר מומחים (שורות Experts): {experts_count}\n"
+        f"מומחים בדירוג: {len(leaders)}\n"
+    )
+    await update.message.reply_text(text)
+
+
+async def hourly_stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not is_admin(user.id):
+        await update.message.reply_text("אין לך הרשאה.")
+        return
+
+    # Placeholder פשוט
+    text = "⏱️ סטטיסטיקות שעתיות: כרגע אין נתונים היסטוריים מפורטים."
+    await update.message.reply_text(text)
+
+
+async def export_metrics_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not is_admin(user.id):
+        await update.message.reply_text("אין לך הרשאה.")
+        return
+
+    # יצוא תמציתי
+    users_sheet = sheets_service.get_users_sheet()
+    experts_sheet = sheets_service.get_experts_sheet()
+    users = users_sheet.get_all_records()
+    experts = experts_sheet.get_all_records()
+
+    text = (
+        "📁 יצוא מדדים (תמציתי):\n\n"
+        f"Users: {len(users)} רשומות\n"
+        f"Experts: {len(experts)} רשומות\n\n"
+    )
+    await update.message.reply_text(text)
