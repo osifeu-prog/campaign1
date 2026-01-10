@@ -1,74 +1,98 @@
-﻿# bot/handlers/supporter_handlers.py
-from datetime import datetime
+# bot/handlers/supporter_handlers.py
+# ==================================
+# תהליך הרשמת תומך – 5 שלבים מלאים
+# ==================================
+
 from telegram import Update
 from telegram.ext import ContextTypes
-from services import sheets_service
 
-async def apply_supporter_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("מתחילים בהרשמת תומך. איך קוראים לך?")
-    return "SUPPORTER_NAME"
+from services.sheets_service import sheets_service
+from services.logger_service import log
+from bot.core.session_manager import session_manager
+from utils.constants import SUPPORT_GROUP_ID
+
 
 async def supporter_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
     name = update.message.text.strip()
-    context.user_data["supporter_name"] = name
+
+    session = session_manager.get_or_create(user)
+    session.metadata["supporter_name"] = name
+
+    await log(context, "Supporter name received", user=user, extra={"name": name})
     await update.message.reply_text("באיזו עיר אתה גר?")
-    return "SUPPORTER_CITY"
+    
 
 async def supporter_city(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
     city = update.message.text.strip()
-    context.user_data["supporter_city"] = city
-    await update.message.reply_text("כתובת אימייל (אפשר לכתוב 'דלג'):")
-    return "SUPPORTER_EMAIL"
+
+    session = session_manager.get_or_create(user)
+    session.metadata["supporter_city"] = city
+
+    await log(context, "Supporter city received", user=user, extra={"city": city})
+    await update.message.reply_text("מה כתובת האימייל שלך?")
+    
 
 async def supporter_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
     email = update.message.text.strip()
-    if email.lower() != "דלג" and "@" not in email:
-        await update.message.reply_text("האימייל לא נראה תקין. דוגמה: name@example.com או כתוב 'דלג'.")
-        return "SUPPORTER_EMAIL"
-    context.user_data["supporter_email"] = "" if email.lower() == "דלג" else email
-    await update.message.reply_text("מה מספר הטלפון שלך? (אפשר 'דלג')")
-    return "SUPPORTER_PHONE"
+
+    session = session_manager.get_or_create(user)
+    session.metadata["supporter_email"] = email
+
+    await log(context, "Supporter email received", user=user, extra={"email": email})
+    await update.message.reply_text("מה מספר הטלפון שלך?")
+    
 
 async def supporter_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
     phone = update.message.text.strip()
-    context.user_data["supporter_phone"] = "" if phone.lower() == "דלג" else phone
-    await update.message.reply_text("מה גרם לך להצטרף לתנועה? (כמה משפטים)")
-    return "SUPPORTER_REASON"
+
+    session = session_manager.get_or_create(user)
+    session.metadata["supporter_phone"] = phone
+
+    await log(context, "Supporter phone received", user=user, extra={"phone": phone})
+    await update.message.reply_text("רוצה להוסיף הערה או משוב? (לא חובה)")
+    
 
 async def supporter_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Idempotency guard for conversation end
-    try:
-        update_id = getattr(update, "update_id", None)
-        if update_id is not None:
-            last = context.chat_data.get("last_handled_update_id")
-            if last == update_id:
-                return -1
-            context.chat_data["last_handled_update_id"] = update_id
-    except Exception:
-        pass
+    user = update.effective_user
+    feedback = update.message.text.strip()
 
-    reason = update.message.text.strip()
-    if len(reason) < 20:
-        await update.message.reply_text("נשמח לכמה משפטים נוספים (לפחות 20 תווים).")
-        return "SUPPORTER_REASON"
+    session = session_manager.get_or_create(user)
+    session.metadata["supporter_feedback"] = feedback
 
-    user_row = {
-        "user_id": update.message.from_user.id,
-        "username": update.message.from_user.username or "",
-        "full_name_telegram": f"{update.message.from_user.first_name} {getattr(update.message.from_user, 'last_name', '')}".strip(),
+    # שמירה לשיטס
+    record = {
+        "user_id": user.id,
+        "username": user.username or "",
+        "full_name_telegram": session.metadata.get("supporter_name", user.full_name),
         "role": "supporter",
-        "city": context.user_data.get("supporter_city", ""),
-        "email": context.user_data.get("supporter_email", ""),
-        "phone": context.user_data.get("supporter_phone", ""),
-        "referrer": "",
+        "city": session.metadata.get("supporter_city", ""),
+        "email": session.metadata.get("supporter_email", ""),
+        "phone": session.metadata.get("supporter_phone", ""),
+        "referrer": session.last_deeplink or "",
         "joined_via_expert_id": "",
-        "created_at": datetime.utcnow().isoformat(),
+        "created_at": session.created_at,
     }
 
-    try:
-        sheets_service.append_user(user_row)
-        await update.message.reply_text("תודה! הרשמתך נקלטה בהצלחה.")
-    except Exception as e:
-        print("⚠ Failed to append supporter:", e)
-        await update.message.reply_text("אירעה שגיאה פנימית בעיבוד הבקשה. אנא נסה שנית בעוד רגע.")
-    return -1
+    sheets_service.append_user(record)
+
+    await log(context, "Supporter registered", user=user, extra=record)
+
+    # שליחה לקבוצת תומכים
+    if SUPPORT_GROUP_ID:
+        try:
+            await context.bot.send_message(
+                chat_id=int(SUPPORT_GROUP_ID),
+                text=f"🎉 תומך חדש הצטרף!\n\nשם: {record['full_name_telegram']}\nעיר: {record['city']}\nאימייל: {record['email']}\nטלפון: {record['phone']}",
+            )
+        except Exception:
+            pass
+
+    await update.message.reply_text(
+        "תודה שנרשמת כתומך! 🎉\n\n"
+        "עכשיו אתה חלק מתנועת אחדות.\n"
+        "תוכל לשתף את הקישור האישי שלך דרך התפריט הראשי."
+    )
