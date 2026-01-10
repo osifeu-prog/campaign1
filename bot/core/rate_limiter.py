@@ -1,8 +1,5 @@
-# ===============================
-# rate_limiter – הגבלת תדירות פעולות למשתמש
-# ===============================
-
-from __future__ import annotations
+# bot/core/rate_limiter.py
+# הגבלת תדירות פעולות למשתמש
 
 from collections import defaultdict
 from datetime import datetime, timedelta
