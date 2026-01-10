@@ -1,5 +1,4 @@
 ﻿# hotfixes.py
-# Runtime safety shim: add missing aliases and safe placeholders to avoid import-time crashes.
 try:
     import bot.handlers.bot_handlers as bh
     if not hasattr(bh, "handle_start_callback_entry") and hasattr(bh, "start"):
@@ -16,7 +15,7 @@ try:
     import services.sheets_service as ss
     if not hasattr(ss, "sheets_service"):
         ss.sheets_service = None
-    if not hasattr(ss, "SPREADSHEET_ID"):
-        ss.SPREADSHEET_ID = ""
+    if not hasattr(ss, "_degraded"):
+        ss._degraded = False
 except Exception:
     pass
