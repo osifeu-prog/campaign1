@@ -1,4 +1,4 @@
-# main.py – נקודת כניסה משודרגת
+# main.py – נקודת כניסה משודרגת (מתוקן)
 import os
 import sys
 import traceback
@@ -54,6 +54,8 @@ from utils.constants import (
     CALLBACK_START_SOCI,
     CALLBACK_START_FINISH,
     CALLBACK_DONATE,
+    CALLBACK_COPY_WALLET,
+    CALLBACK_TON_INFO,
 )
 from bot.core.monitoring import monitoring
 
@@ -132,20 +134,20 @@ async def startup_event():
 
     # --- Callback handlers בסדר נכון ---
 
-    # 1) אישור/דחיית מומחים
+    # 1) אישור/דחיית מומחים (pattern handled inside handler)
     application.add_handler(CallbackQueryHandler(
         expert_admin_callback,
         pattern=r"^expert_(approve|reject):"
     ))
 
-    # 2) תרומות
+    # 2) תרומות - טיפול בקריאה ל־donate (מדויק)
     application.add_handler(CallbackQueryHandler(
         handle_donation_callback,
-        pattern=r"^donate|^CALLBACK_DONATE|^copy_wallet|^ton_info|^menu_main"
+        pattern=rf"^{CALLBACK_DONATE}$"
     ))
-    # ספציפיים ל־donation callbacks
-    application.add_handler(CallbackQueryHandler(handle_copy_wallet_callback, pattern=r"^copy_wallet$"))
-    application.add_handler(CallbackQueryHandler(handle_ton_info_callback, pattern=r"^ton_info$"))
+    # ספציפיים ל־donation callbacks (copy_wallet, ton_info)
+    application.add_handler(CallbackQueryHandler(handle_copy_wallet_callback, pattern=rf"^{CALLBACK_COPY_WALLET}$"))
+    application.add_handler(CallbackQueryHandler(handle_ton_info_callback, pattern=rf"^{CALLBACK_TON_INFO}$"))
 
     # 3) Pagination
     application.add_handler(CallbackQueryHandler(
@@ -234,12 +236,19 @@ async def startup_event():
     # עדכון מטריקות ראשוני
     monitoring.update_metrics_from_sheets()
 
-    # הגדרת Cleanup Job
+    # הגדרת Cleanup Job (אם JobQueue זמין)
     from datetime import time
-    application.job_queue.run_daily(
-        cleanup_monitoring_job,
-        time=time(hour=0, minute=5)
-    )
+    if getattr(application, "job_queue", None) is not None:
+        try:
+            application.job_queue.run_daily(
+                cleanup_monitoring_job,
+                time=time(hour=0, minute=5)
+            )
+            print("✔ Cleanup job scheduled with JobQueue")
+        except Exception as e:
+            print(f"⚠ Failed to schedule cleanup job: {e}", file=sys.stderr)
+    else:
+        print("⚠ JobQueue not available. Skipping scheduled cleanup job.", file=sys.stderr)
 
     print("🤖 Bot initialized and running!")
 
@@ -296,7 +305,10 @@ async def telegram_webhook(request: Request):
     except Exception as e:
         print("❌ Error processing update:", e, file=sys.stderr)
         traceback.print_exc()
-        monitoring.track_error("webhook_processing", str(e))
+        try:
+            monitoring.track_error("webhook_processing", str(e))
+        except Exception:
+            pass
         return {"ok": False, "error": str(e)}
 
 @app.get("/health")
