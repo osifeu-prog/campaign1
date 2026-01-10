@@ -1,5 +1,5 @@
 # ===============================
-# session_manager – ניהול סשנים ו־State Machine
+# core/session_manager – ניהול סשנים ו־State Machine
 # ===============================
 
 from __future__ import annotations
@@ -17,10 +17,10 @@ class UserSession:
     username: str
     full_name: str
     created_at: str
-    last_flow: Optional[str] = None          # e.g. "supporter_signup", "expert_signup", "start_carousel"
-    last_state: Optional[str] = None         # e.g. "SUPPORTER_EMAIL"
+    last_flow: Optional[str] = None
+    last_state: Optional[str] = None
     last_message_id: Optional[int] = None
-    last_deeplink: Optional[str] = None      # start_param
+    last_deeplink: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -38,16 +38,7 @@ class UserSession:
 
 
 class SessionManager:
-    """
-    SessionManager – אחראי על:
-    - יצירת סשן למשתמש
-    - עדכון state אחרון
-    - שחזור מצב (continue where you left off)
-    - שמירת deeplink
-    """
-
     def __init__(self):
-        # זיכרון in-memory; בהמשך אפשר להחליף ל־Redis / DB
         self._sessions: Dict[int, UserSession] = {}
 
     def get_or_create(self, user: User, start_param: Optional[str] = None) -> UserSession:
@@ -100,5 +91,4 @@ class SessionManager:
         session.last_message_id = None
 
 
-# Singleton פשוט
 session_manager = SessionManager()
