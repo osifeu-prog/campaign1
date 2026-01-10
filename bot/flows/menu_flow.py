@@ -1,18 +1,14 @@
 # ===============================
-# menu_flow – תפריטים, callbacks, smart fallback
+# menu_flow – תפריטים, callbacks, smart fallback בסיסי
 # ===============================
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes, ConversationHandler
 
-from bot.session_manager import session_manager
-from bot.telemetry import telemetry
-from bot.states import (
-    SUPPORTER_NAME,
-    EXPERT_NAME,
-)
-from bot.keyboards import build_main_menu_for_user
-from bot.expert_handlers import build_expert_referral_link
+from bot.core.session_manager import session_manager
+from bot.core.telemetry import telemetry
+from bot.ui.keyboards import build_main_menu_for_user
+from bot.states import SUPPORTER_NAME, EXPERT_NAME
 from services import sheets_service
 from services.logger_service import log
 from utils.constants import (
@@ -39,7 +35,7 @@ async def handle_menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    from bot import admin_handlers  # למניעת import מעגלי
+    from bot.handlers import admin_handlers
 
     query = update.callback_query
     await query.answer()
@@ -48,7 +44,6 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     bot_username = context.bot.username
     session_manager.get_or_create(user)
 
-    # תפריט ראשי
     if data == CALLBACK_MENU_MAIN:
         await log(context, "Open main menu (callback)", user=user)
         keyboard = build_main_menu_for_user(user.id, is_admin(user.id))
@@ -56,7 +51,6 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         await telemetry.track_event(context, "menu_main_open", user=user)
         return ConversationHandler.END
 
-    # תפריט תומך
     if data == CALLBACK_MENU_SUPPORT:
         await log(context, "Open supporter menu", user=user)
 
@@ -93,13 +87,14 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         await telemetry.track_event(context, "menu_support_open", user=user)
         return ConversationHandler.END
 
-    # תפריט מומחה
     if data == CALLBACK_MENU_EXPERT:
         await log(context, "Open expert menu", user=user)
 
         status = sheets_service.get_expert_status(str(user.id))
         position = sheets_service.get_expert_position(str(user.id))
         group_link = sheets_service.get_expert_group_link(str(user.id))
+
+        from bot.handlers.expert_handlers import build_expert_referral_link
         referral_link = build_expert_referral_link(bot_username, user.id)
 
         if status is None:
@@ -164,7 +159,6 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         await telemetry.track_event(context, "menu_expert_open", user=user, properties={"status": status})
         return ConversationHandler.END
 
-    # תפריט אדמין
     if data == CALLBACK_MENU_ADMIN:
         if not is_admin(user.id):
             await query.message.reply_text("אין לך הרשאה לצפות בפאנל האדמין.")
@@ -175,11 +169,11 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             "🛠️ פאנל אדמין:\n\n"
             "באפשרותך להשתמש בפקודות או בכפתורים שלמטה.\n"
         )
-        await query.message.reply_text(text, reply_markup=build_main_menu_for_user(user.id, True))
+        from bot.ui.keyboards import build_admin_panel_keyboard
+        await query.message.reply_text(text, reply_markup=build_admin_panel_keyboard())
         await telemetry.track_event(context, "menu_admin_open", user=user)
         return ConversationHandler.END
 
-    # apply מומחה / תומך
     if data == CALLBACK_APPLY_SUPPORTER:
         await log(context, "User chose apply supporter from menu", user=user)
         await telemetry.track_event(context, "apply_supporter_clicked", user=user)
@@ -192,7 +186,6 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         await query.message.reply_text("מתחילים בהגשת מועמדות כמומחה. מה שמך המלא?")
         return EXPERT_NAME
 
-    # רשימת מקומות
     if data == CALLBACK_MENU_POSITIONS:
         positions = sheets_service.get_positions()
         await log(context, "View positions from menu", user=user, extra={"positions_count": len(positions)})
@@ -204,6 +197,5 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         await telemetry.track_event(context, "positions_view", user=user, properties={"count": len(positions)})
         return ConversationHandler.END
 
-    # תתי־תפריטים של אדמין
     await admin_handlers.handle_admin_callback(query, context)
     return ConversationHandler.END
