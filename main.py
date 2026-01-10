@@ -1,4 +1,4 @@
-# main.py – נקודת כניסה משודרגת עם בדיקות והרשאות Google מפורטות
+﻿# main.py  נקודת כניסה משודרגת עם בדיקות והרשאות Google מפורטות
 import os
 import sys
 import traceback
@@ -109,15 +109,40 @@ application = (
 )
 
 # ===============================
+# Global error handler
+# ===============================
+async def _global_error_handler(update, context):
+    """
+    Catches unhandled exceptions from handlers, logs traceback and notifies user gracefully.
+    """
+    try:
+        import traceback as _tb
+        print("❌ Unhandled exception in update handler:", file=sys.stderr)
+        _tb.print_exception(type(context.error), context.error, context.error.__traceback__)
+        # Try to notify the user in a friendly way (best-effort)
+        try:
+            chat_id = None
+            if update:
+                if getattr(update, "effective_chat", None):
+                    chat_id = update.effective_chat.id
+                elif getattr(update, "message", None) and update.message.chat:
+                    chat_id = update.message.chat.id
+            if chat_id:
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text="אירעה שגיאה פנימית בעיבוד הבקשה. אנא נסה שנית בעוד רגע."
+                )
+        except Exception:
+            pass
+    except Exception as e:
+        print("❌ Error in global error handler:", e, file=sys.stderr)
+
+# ===============================
 # בדיקת ENV + בדיקות הרשאות Google
 # ===============================
 
 def _log_google_auth_issue(exc: Exception):
-    """
-    ניתוח שגיאות כדי לזהות 401/403 ולהדפיס הודעות ברורות בלוג.
-    """
     msg = str(exc) or ""
-    # חיפוש ישיר בקוד השגיאה או בהודעת השגיאה
     if "401" in msg or "unauthorized" in msg.lower() or "invalid" in msg.lower():
         print("❌ Google Auth Error detected: 401 Unauthorized or invalid credentials", file=sys.stderr)
         print(f"   Details: {msg}", file=sys.stderr)
@@ -127,15 +152,10 @@ def _log_google_auth_issue(exc: Exception):
         print(f"   Details: {msg}", file=sys.stderr)
         print("   Suggestion: Ensure the Service Account is granted Editor access to the spreadsheet and Drive API is enabled.", file=sys.stderr)
     else:
-        # Generic auth/logging
         print("❌ Google API error during client initialization:", file=sys.stderr)
         print(f"   {msg}", file=sys.stderr)
 
 def validate_env():
-    """
-    בדיקת משתני סביבה חיוניים. בנוסף מנסה לאתחל את הלקוח של Google Sheets
-    בצורה מבוקרת כדי לאבחן בעיות הרשאה מוקדם בתהליך ה-startup.
-    """
     required_vars = {
         "TELEGRAM_BOT_TOKEN": TOKEN,
         "WEBHOOK_URL": WEBHOOK_URL,
@@ -146,28 +166,22 @@ def validate_env():
     if missing:
         raise Exception(f"Missing required ENV variables: {', '.join(missing)}")
 
-    # Try a lightweight initialization of the sheets client to detect auth/permission issues early.
     try:
-        # sheets_service is an instance; call its init method to force auth attempt and catch errors.
-        # The method name in the service is _init_client (instance method).
         if hasattr(sheets_service, "_init_client"):
             sheets_service._init_client()
         else:
-            # defensive fallback: try to call a public method that triggers lazy init
             try:
                 sheets_service.smart_validate_sheets()
             except Exception as inner_exc:
                 _log_google_auth_issue(inner_exc)
                 raise
 
-        # Try a harmless call to confirm access
         try:
             sp = getattr(sheets_service, "_spreadsheet", None)
             if sp and getattr(sp, "_properties", None):
                 title = sp._properties.get("title", "<unknown>")
                 print(f"✔ Google Sheets access verified for spreadsheet: {title}")
             else:
-                # fallback: try to list worksheets (may raise API errors)
                 try:
                     _ = sheets_service._spreadsheet.worksheets()
                     print("✔ Google Sheets access verified (worksheets listed).")
@@ -178,13 +192,11 @@ def validate_env():
             _log_google_auth_issue(inner_exc)
             raise
     except Exception as e:
-        # If any exception occurs during client init, analyze and raise a clear error
         _log_google_auth_issue(e)
-        # Re-raise to let startup fail with clear logs
         raise
 
 # ===============================
-# Startup – טעינת הבוט
+# Startup  טעינת הבוט
 # ===============================
 
 @app.on_event("startup")
@@ -196,13 +208,11 @@ async def startup_event():
         print("✔ ENV validation passed")
     except Exception as e:
         print(f"❌ ENV validation failed: {e}", file=sys.stderr)
-        # print traceback for deeper debugging
         traceback.print_exc()
         raise
 
     print("🔍 Running Smart Validation on Google Sheets...")
     try:
-        # smart_validate_sheets will also use the initialized client
         sheets_service.smart_validate_sheets()
         print("✔ Sheets validated successfully")
     except Exception as e:
@@ -211,6 +221,13 @@ async def startup_event():
         print("⚠️ Continuing startup WITHOUT sheet validation. Be aware some features may fail at runtime.", file=sys.stderr)
 
     print("🔧 Initializing bot handlers...")
+
+    # Register global error handler
+    try:
+        application.add_error_handler(_global_error_handler)
+        print("✔ Global error handler registered")
+    except Exception as e:
+        print("⚠ Failed to register global error handler:", e, file=sys.stderr)
 
     # ConversationHandler הראשי
     conv_handler = bot_handlers.get_conversation_handler()
@@ -255,14 +272,14 @@ async def startup_event():
     application.add_handler(CommandHandler("groupid", bot_handlers.group_id))
     application.add_handler(CommandHandler("leaderboard", leaderboard_command))
 
-    # --- פקודות אדמין – מקומות ---
+    # --- פקודות אדמין  מקומות ---
     application.add_handler(CommandHandler("positions", list_positions))
     application.add_handler(CommandHandler("position", position_details))
     application.add_handler(CommandHandler("assign", assign_position_cmd))
     application.add_handler(CommandHandler("reset_position", reset_position_cmd))
     application.add_handler(CommandHandler("reset_all_positions", reset_all_positions_cmd))
 
-    # --- פקודות אדמין – שיטס ---
+    # --- פקודות אדמין  שיטס ---
     application.add_handler(CommandHandler("fix_sheets", fix_sheets))
     application.add_handler(CommandHandler("validate_sheets", validate_sheets))
     application.add_handler(CommandHandler("sheet_info", sheet_info))
@@ -270,7 +287,7 @@ async def startup_event():
     application.add_handler(CommandHandler("clear_user_duplicates", clear_user_duplicates_cmd))
     application.add_handler(CommandHandler("backup_sheets", backup_sheets_cmd))
 
-    # --- פקודות אדמין – חיפוש ורשימות ---
+    # --- פקודות אדמין  חיפוש ורשימות ---
     application.add_handler(CommandHandler("find_user", find_user))
     application.add_handler(CommandHandler("find_expert", find_expert))
     application.add_handler(CommandHandler("find_position", find_position))
@@ -279,11 +296,11 @@ async def startup_event():
     application.add_handler(CommandHandler("list_supporters", list_supporters))
     application.add_handler(CommandHandler("admin_menu", admin_menu))
 
-    # --- פקודות אדמין – שידור ---
+    # --- פקודות אדמין  שידור ---
     application.add_handler(CommandHandler("broadcast_supporters", broadcast_supporters))
     application.add_handler(CommandHandler("broadcast_experts", broadcast_experts))
 
-    # --- פקודות אדמין – Monitoring ---
+    # --- פקודות אדמין  Monitoring ---
     application.add_handler(CommandHandler("dashboard", dashboard_command))
     application.add_handler(CommandHandler("hourly_stats", hourly_stats_command))
     application.add_handler(CommandHandler("export_metrics", export_metrics_command))

@@ -1,4 +1,4 @@
-# services/sheets_service.py
+﻿# services/sheets_service.py
 import os
 import time
 import json
@@ -356,3 +356,74 @@ class SheetsService:
 
 # singleton (safe to instantiate; client will initialize lazily)
 sheets_service = SheetsService()
+
+# -------------------------
+# Compatibility shim: expose module-level functions that delegate to the sheets_service instance
+# This allows existing code that does `import services.sheets_service as sheets_service`
+# and then calls `sheets_service.get_positions()` to continue working.
+# -------------------------
+def get_positions() -> List[Dict[str, Any]]:
+    return sheets_service.get_positions()
+
+def get_position(position_id: str) -> Optional[Dict[str, Any]]:
+    return sheets_service.get_position(position_id)
+
+def position_is_free(position_id: str) -> bool:
+    return sheets_service.position_is_free(position_id)
+
+def assign_position(position_id: str, user_id: str, timestamp: Optional[str] = None):
+    return sheets_service.assign_position(position_id, user_id, timestamp)
+
+def reset_position(position_id: str):
+    return sheets_service.reset_position(position_id)
+
+def reset_all_positions():
+    return sheets_service.reset_all_positions()
+
+def get_supporter_by_id(user_id: str) -> Optional[Dict[str, Any]]:
+    return sheets_service.get_supporter_by_id(user_id)
+
+def get_expert_by_id(user_id: str) -> Optional[Dict[str, Any]]:
+    return sheets_service.get_expert_by_id(user_id)
+
+def append_user(user_record: Dict[str, Any]):
+    return sheets_service.append_user(user_record)
+
+def append_expert(expert_record: Dict[str, Any]):
+    return sheets_service.append_expert(expert_record)
+
+def update_expert_status(user_id: str, status: str):
+    return sheets_service.update_expert_status(user_id, status)
+
+def get_experts_leaderboard() -> List[Dict[str, Any]]:
+    return sheets_service.get_experts_leaderboard()
+
+def clear_user_duplicates() -> int:
+    return sheets_service.clear_user_duplicates()
+
+def clear_expert_duplicates() -> int:
+    return sheets_service.clear_expert_duplicates()
+
+def smart_validate_sheets():
+    return sheets_service.smart_validate_sheets()
+
+# Export names for clarity
+__all__ = [
+    "SPREADSHEET_ID",
+    "sheets_service",
+    "get_positions",
+    "get_position",
+    "position_is_free",
+    "assign_position",
+    "reset_position",
+    "reset_all_positions",
+    "get_supporter_by_id",
+    "get_expert_by_id",
+    "append_user",
+    "append_expert",
+    "update_expert_status",
+    "get_experts_leaderboard",
+    "clear_user_duplicates",
+    "clear_expert_duplicates",
+    "smart_validate_sheets",
+]
