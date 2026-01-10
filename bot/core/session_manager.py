@@ -1,5 +1,5 @@
 # ===============================
-# core/session_manager – ניהול סשנים ו־State Machine
+# session_manager – ניהול סשנים ו־State Machine בסיסי
 # ===============================
 
 from __future__ import annotations
