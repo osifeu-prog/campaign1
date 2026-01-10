@@ -80,3 +80,11 @@ def get_conversation_handler():
         per_message=False,
     )
     return conv
+# Backwards-compatible alias: ensure main.py can register handle_start_callback_entry
+def handle_start_callback_entry(update, context):
+    # delegate to start handler if present
+    try:
+        return start(update, context)
+    except Exception:
+        # fallback: no-op
+        return

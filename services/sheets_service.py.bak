@@ -10,17 +10,14 @@ from functools import wraps
 import gspread
 from google.oauth2.service_account import Credentials
 
-from utils.constants import (
-    GOOGLE_SHEETS_SPREADSHEET_ID,
-    USERS_SHEET_NAME,
-    EXPERTS_SHEET_NAME,
-    POSITIONS_SHEET_NAME,
-)
+# Constants expected from utils/constants or env
+GOOGLE_SHEETS_SPREADSHEET_ID = os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID", "")
+USERS_SHEET_NAME = os.getenv("USERS_SHEET_NAME", "Telegram Leads")
+EXPERTS_SHEET_NAME = os.getenv("EXPERTS_SHEET_NAME", "Experts")
+POSITIONS_SHEET_NAME = os.getenv("POSITIONS_SHEET_NAME", "Positions")
 
-# Expose spreadsheet id at module level so main.py can validate ENV without instantiating client
 SPREADSHEET_ID = GOOGLE_SHEETS_SPREADSHEET_ID
 
-# Retry decorator for transient errors
 def retry(exceptions, tries=3, delay=1.0, backoff=2.0):
     def deco_retry(f):
         @wraps(f)
@@ -29,7 +26,7 @@ def retry(exceptions, tries=3, delay=1.0, backoff=2.0):
             while mtries > 1:
                 try:
                     return f(*args, **kwargs)
-                except exceptions as e:
+                except exceptions:
                     time.sleep(mdelay)
                     mtries -= 1
                     mdelay *= backoff
@@ -40,34 +37,22 @@ def retry(exceptions, tries=3, delay=1.0, backoff=2.0):
 _lock = threading.Lock()
 
 class SheetsService:
-    """
-    SheetsService with lazy initialization of the gspread client.
-    Avoids performing network/auth during module import.
-    """
     def __init__(self):
         self._client = None
         self._spreadsheet = None
-        # Use module-level SPREADSHEET_ID (from constants) so main can check it early
         self.SPREADSHEET_ID = SPREADSHEET_ID
 
     def _init_client(self):
-        """
-        Initialize gspread client lazily. Called by methods that need access.
-        """
         if self._client and self._spreadsheet:
             return
-
         creds_json = os.getenv("GOOGLE_CREDENTIALS_JSON", "")
         if not creds_json:
             raise Exception("GOOGLE_CREDENTIALS_JSON not set")
-
         try:
             info = json.loads(creds_json)
         except Exception:
-            # maybe it's a path to a file
             with open(creds_json, "r", encoding="utf-8") as fh:
                 info = json.load(fh)
-
         scopes = [
             "https://www.googleapis.com/auth/spreadsheets",
             "https://www.googleapis.com/auth/drive",
@@ -78,11 +63,7 @@ class SheetsService:
             raise Exception("GOOGLE_SHEETS_SPREADSHEET_ID not set")
         self._spreadsheet = self._client.open_by_key(self.SPREADSHEET_ID)
 
-    # -------------------------
-    # Sheet helpers
-    # -------------------------
     def _get_sheet(self, name: str):
-        # ensure client initialized
         self._init_client()
         try:
             return self._spreadsheet.worksheet(name)
@@ -100,7 +81,6 @@ class SheetsService:
                 sh.append_row(headers)
                 return sh
             except Exception:
-                # maybe sheet exists concurrently
                 sh = self._get_sheet(name)
                 if sh:
                     return sh
@@ -113,7 +93,6 @@ class SheetsService:
             if not current:
                 sheet.insert_row(headers, index=1)
                 return
-            # add missing headers at the end
             missing = [h for h in headers if h not in current]
             if missing:
                 sheet.resize(rows=sheet.row_count, cols=len(current) + len(missing))
@@ -122,7 +101,6 @@ class SheetsService:
                 sheet.update("1:1", [current])
 
     def smart_validate_sheets(self):
-        # Ensure the three main sheets exist and have headers
         users_headers = ["user_id", "username", "full_name_telegram", "role", "city", "email", "phone", "referrer", "joined_via_expert_id", "created_at"]
         experts_headers = ["user_id", "expert_full_name", "expert_field", "expert_experience", "expert_position", "expert_links", "expert_why", "created_at", "status", "group_link", "supporters_count"]
         positions_headers = ["position_id", "title", "description", "expert_user_id", "assigned_at"]
@@ -135,9 +113,6 @@ class SheetsService:
         self.ensure_headers(experts_sheet, experts_headers)
         self.ensure_headers(positions_sheet, positions_headers)
 
-    # -------------------------
-    # Basic getters
-    # -------------------------
     def get_users_sheet(self):
         sh = self._get_sheet(USERS_SHEET_NAME)
         if not sh:
@@ -159,18 +134,12 @@ class SheetsService:
             sh = self._get_sheet(POSITIONS_SHEET_NAME)
         return sh
 
-    # -------------------------
-    # Info helpers
-    # -------------------------
     def get_sheet_info(self, sheet):
         headers = sheet.row_values(1) or []
         rows = len(sheet.get_all_values()) - 1
         cols = len(headers)
         return {"headers": headers, "rows": rows, "cols": cols}
 
-    # -------------------------
-    # Users / Experts operations
-    # -------------------------
     @retry(Exception, tries=3, delay=0.5)
     def append_user(self, user_record: Dict[str, Any]):
         sheet = self.get_users_sheet()
@@ -221,9 +190,6 @@ class SheetsService:
                 return r
         return None
 
-    # -------------------------
-    # Positions
-    # -------------------------
     @retry(Exception, tries=3, delay=0.5)
     def get_positions(self) -> List[Dict[str, Any]]:
         sheet = self.get_positions_sheet()
@@ -258,11 +224,9 @@ class SheetsService:
                     if col_assigned:
                         sheet.update_cell(idx, col_assigned, timestamp or datetime.utcnow().isoformat())
                 return True
-        # if not found, append
         with _lock:
             row = [position_id] + [""] * (len(headers) - 1)
             sheet.append_row(row)
-            # then assign
             self.assign_position(position_id, user_id, timestamp)
         return True
 
@@ -294,9 +258,6 @@ class SheetsService:
                     sheet.update_cell(idx, headers.index("assigned_at") + 1, "")
         return True
 
-    # -------------------------
-    # Duplicates / cleanup
-    # -------------------------
     @retry(Exception, tries=3, delay=0.5)
     def clear_user_duplicates(self) -> int:
         sheet = self.get_users_sheet()
@@ -329,9 +290,6 @@ class SheetsService:
                     seen.add(uid)
         return deleted
 
-    # -------------------------
-    # Leaderboard
-    # -------------------------
     def get_experts_leaderboard(self) -> List[Dict[str, Any]]:
         sheet = self.get_experts_sheet()
         rows = sheet.get_all_records()
@@ -343,95 +301,37 @@ class SheetsService:
         sorted_rows = sorted(rows, key=lambda r: safe_int(r.get("supporters_count", 0)), reverse=True)
         return sorted_rows
 
-    # -------------------------
-    # Utilities for admin
-    # -------------------------
     def auto_fix_all_sheets(self):
-        # Placeholder: currently smart_validate_sheets already fixes headers
         self.smart_validate_sheets()
 
     def validate_all_sheets(self):
-        # Basic validation: ensure headers exist
         self.smart_validate_sheets()
 
-# singleton (safe to instantiate; client will initialize lazily)
 sheets_service = SheetsService()
 
-# -------------------------
-# Compatibility shim: expose module-level functions that delegate to the sheets_service instance
-# This allows existing code that does `import services.sheets_service as sheets_service`
-# and then calls `sheets_service.get_positions()` to continue working.
-# -------------------------
-def get_positions() -> List[Dict[str, Any]]:
-    return sheets_service.get_positions()
-
-def get_position(position_id: str) -> Optional[Dict[str, Any]]:
-    return sheets_service.get_position(position_id)
-
-def position_is_free(position_id: str) -> bool:
-    return sheets_service.position_is_free(position_id)
-
-def assign_position(position_id: str, user_id: str, timestamp: Optional[str] = None):
-    return sheets_service.assign_position(position_id, user_id, timestamp)
-
-def reset_position(position_id: str):
-    return sheets_service.reset_position(position_id)
-
-def reset_all_positions():
-    return sheets_service.reset_all_positions()
-
-def get_supporter_by_id(user_id: str) -> Optional[Dict[str, Any]]:
-    return sheets_service.get_supporter_by_id(user_id)
-
-def get_expert_by_id(user_id: str) -> Optional[Dict[str, Any]]:
-    return sheets_service.get_expert_by_id(user_id)
-
+# Compatibility aliases for older callers
 def append_user(user_record: Dict[str, Any]):
     return sheets_service.append_user(user_record)
 
 def append_expert(expert_record: Dict[str, Any]):
     return sheets_service.append_expert(expert_record)
 
-def update_expert_status(user_id: str, status: str):
-    return sheets_service.update_expert_status(user_id, status)
+def append_user_row(user_record: Dict[str, Any]):
+    return append_user(user_record)
 
-def get_experts_leaderboard() -> List[Dict[str, Any]]:
-    return sheets_service.get_experts_leaderboard()
+def append_expert_row(expert_record: Dict[str, Any]):
+    return append_expert(expert_record)
 
-def clear_user_duplicates() -> int:
-    return sheets_service.clear_user_duplicates()
-
-def clear_expert_duplicates() -> int:
-    return sheets_service.clear_expert_duplicates()
-
-def smart_validate_sheets():
-    return sheets_service.smart_validate_sheets()
-
-# Export names for clarity
 __all__ = [
     "SPREADSHEET_ID",
     "sheets_service",
-    "get_positions",
-    "get_position",
-    "position_is_free",
-    "assign_position",
-    "reset_position",
-    "reset_all_positions",
-    "get_supporter_by_id",
-    "get_expert_by_id",
     "append_user",
     "append_expert",
+    "append_user_row",
+    "append_expert_row",
     "update_expert_status",
     "get_experts_leaderboard",
     "clear_user_duplicates",
     "clear_expert_duplicates",
     "smart_validate_sheets",
 ]
-# Backwards-compatible aliases
-def append_user_row(user_record):
-    """Backward-compatible alias for append_user"""
-    return append_user(user_record)
-
-def append_expert_row(expert_record):
-    """Backward-compatible alias for append_expert"""
-    return append_expert(expert_record)
