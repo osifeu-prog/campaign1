@@ -427,3 +427,11 @@ __all__ = [
     "clear_expert_duplicates",
     "smart_validate_sheets",
 ]
+# Backwards-compatible aliases
+def append_user_row(user_record):
+    """Backward-compatible alias for append_user"""
+    return append_user(user_record)
+
+def append_expert_row(expert_record):
+    """Backward-compatible alias for append_expert"""
+    return append_expert(expert_record)
