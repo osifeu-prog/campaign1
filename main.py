@@ -1,8 +1,9 @@
-# main.py – נקודת כניסה משודרגת (כולל JobQueue usage עבור עיבוד מדיה ברקע)
+# main.py – נקודת כניסה משודרגת עם בדיקות והרשאות Google מפורטות
 import os
 import sys
 import traceback
 import json
+import time
 
 from fastapi import FastAPI, Request
 from telegram import Update
@@ -58,6 +59,8 @@ from utils.constants import (
     CALLBACK_DONATE,
     CALLBACK_COPY_WALLET,
     CALLBACK_TON_INFO,
+    GOOGLE_SHEETS_SPREADSHEET_ID,
+    GOOGLE_CREDENTIALS_JSON,
 )
 from bot.core.monitoring import monitoring
 
@@ -103,19 +106,69 @@ application = (
 )
 
 # ===============================
-# בדיקת ENV
+# בדיקת ENV + בדיקות הרשאות Google
 # ===============================
 
+def _log_google_auth_issue(exc: Exception):
+    """
+    ניתוח שגיאות כדי לזהות 401/403 ולהדפיס הודעות ברורות בלוג.
+    """
+    msg = str(exc) or ""
+    # חיפוש ישיר בקוד השגיאה או בהודעת השגיאה
+    if "401" in msg or "unauthorized" in msg.lower() or "invalid" in msg.lower():
+        print("❌ Google Auth Error detected: 401 Unauthorized or invalid credentials", file=sys.stderr)
+        print(f"   Details: {msg}", file=sys.stderr)
+        print("   Suggestion: Verify GOOGLE_CREDENTIALS_JSON and that the Service Account has access to the spreadsheet.", file=sys.stderr)
+    elif "403" in msg or "forbidden" in msg.lower() or "access" in msg.lower():
+        print("❌ Google Auth Error detected: 403 Forbidden or insufficient permissions", file=sys.stderr)
+        print(f"   Details: {msg}", file=sys.stderr)
+        print("   Suggestion: Ensure the Service Account is granted Editor access to the spreadsheet and Drive API is enabled.", file=sys.stderr)
+    else:
+        # Generic auth/logging
+        print("❌ Google API error during client initialization:", file=sys.stderr)
+        print(f"   {msg}", file=sys.stderr)
+
 def validate_env():
+    """
+    בדיקת משתני סביבה חיוניים. בנוסף מנסה לאתחל את הלקוח של Google Sheets
+    בצורה מבוקרת כדי לאבחן בעיות הרשאה מוקדם בתהליך ה-startup.
+    """
     required_vars = {
         "TELEGRAM_BOT_TOKEN": TOKEN,
         "WEBHOOK_URL": WEBHOOK_URL,
-        "GOOGLE_SHEETS_SPREADSHEET_ID": sheets_service.SPREADSHEET_ID,
-        "GOOGLE_CREDENTIALS_JSON": os.getenv("GOOGLE_CREDENTIALS_JSON"),
+        "GOOGLE_SHEETS_SPREADSHEET_ID": GOOGLE_SHEETS_SPREADSHEET_ID,
+        "GOOGLE_CREDENTIALS_JSON": GOOGLE_CREDENTIALS_JSON,
     }
     missing = [k for k, v in required_vars.items() if not v]
     if missing:
         raise Exception(f"Missing required ENV variables: {', '.join(missing)}")
+
+    # Try a lightweight initialization of the sheets client to detect auth/permission issues early.
+    try:
+        # sheets_service has lazy init; call its internal init to force auth attempt and catch errors.
+        # Use a short timeout pattern: call _init_client and then a harmless API call (get spreadsheet title).
+        sheets_service._init_client()
+        # Try a harmless call to confirm access
+        try:
+            # get spreadsheet title or properties (may raise API errors)
+            props = sheets_service._spreadsheet._properties if getattr(sheets_service, "_spreadsheet", None) else None
+            if props:
+                title = props.get("title", "<unknown>")
+                print(f"✔ Google Sheets access verified for spreadsheet: {title}")
+            else:
+                # fallback: try to fetch a sheet list
+                _ = sheets_service._spreadsheet.worksheets()
+                print("✔ Google Sheets access verified (worksheets listed).")
+        except Exception as inner_exc:
+            # Inspect inner exception for 401/403
+            _log_google_auth_issue(inner_exc)
+            # Re-raise to stop startup (so operator can fix ENV/permissions)
+            raise
+    except Exception as e:
+        # If any exception occurs during client init, analyze and raise a clear error
+        _log_google_auth_issue(e)
+        # Re-raise to let startup fail with clear logs
+        raise
 
 # ===============================
 # Startup – טעינת הבוט
@@ -130,16 +183,19 @@ async def startup_event():
         print("✔ ENV validation passed")
     except Exception as e:
         print(f"❌ ENV validation failed: {e}", file=sys.stderr)
+        # print traceback for deeper debugging
+        traceback.print_exc()
         raise
 
     print("🔍 Running Smart Validation on Google Sheets...")
     try:
+        # smart_validate_sheets will also use the initialized client
         sheets_service.smart_validate_sheets()
         print("✔ Sheets validated successfully")
     except Exception as e:
         print("❌ CRITICAL: Smart Validation failed!", file=sys.stderr)
         traceback.print_exc()
-        print("⚠️ Continuing startup WITHOUT sheet validation.")
+        print("⚠️ Continuing startup WITHOUT sheet validation. Be aware some features may fail at runtime.", file=sys.stderr)
 
     print("🔧 Initializing bot handlers...")
 
@@ -243,10 +299,15 @@ async def startup_event():
         print(f"✔ Webhook set successfully: {final_webhook_url}")
     except Exception as e:
         print(f"❌ Failed to set webhook: {e}", file=sys.stderr)
+        traceback.print_exc()
         raise
 
     # עדכון מטריקות ראשוני
-    monitoring.update_metrics_from_sheets()
+    try:
+        monitoring.update_metrics_from_sheets()
+    except Exception as e:
+        print("⚠ Failed to update monitoring metrics from sheets:", file=sys.stderr)
+        traceback.print_exc()
 
     # הגדרת Cleanup Job (אם JobQueue זמין)
     from datetime import time
