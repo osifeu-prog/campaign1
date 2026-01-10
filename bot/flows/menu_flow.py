@@ -1,10 +1,18 @@
 # bot/flows/menu_flow.py
+# ===============================
+# תפריט ראשי, תומך, מומחה, אדמין, Leaderboard, Positions
+# ===============================
+
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes, ConversationHandler
 
 from bot.core.session_manager import session_manager
 from bot.core.telemetry import telemetry
-from bot.ui.keyboards import build_main_menu_for_user, build_leaderboard_keyboard, build_expert_profile_keyboard
+from bot.ui.keyboards import (
+    build_main_menu_for_user,
+    build_leaderboard_keyboard,
+    build_expert_profile_keyboard,
+)
 from bot.states import SUPPORTER_NAME, EXPERT_NAME
 from services import sheets_service
 from services.logger_service import log
@@ -22,14 +30,25 @@ from utils.constants import (
     CALLBACK_HELP_INFO,
 )
 
+
 def is_admin(user_id: int) -> bool:
     return str(user_id) in ADMIN_IDS
+
+
+# ===============================
+# /menu command
+# ===============================
 
 async def handle_menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     await log(context, "Menu command", user=user)
     keyboard = build_main_menu_for_user(user.id, is_admin(user.id))
     await update.message.reply_text("📋 תפריט ראשי", reply_markup=keyboard)
+
+
+# ===============================
+# Callback router
+# ===============================
 
 async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     from bot.handlers import admin_handlers
@@ -39,6 +58,7 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     data = query.data
     user = query.from_user
     bot_username = context.bot.username
+
     session_manager.get_or_create(user)
 
     # תפריט ראשי
@@ -54,6 +74,7 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         await log(context, "Open supporter menu", user=user)
         supporter = sheets_service.get_supporter_by_id(str(user.id))
         personal_link = f"https://t.me/{bot_username}?start={user.id}"
+
         if supporter:
             text = (
                 "פרופיל תומך:\n\n"
@@ -79,6 +100,7 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
                 [InlineKeyboardButton("🧑‍🎓 התחלת הרשמת תומך", callback_data=CALLBACK_APPLY_SUPPORTER)],
                 [InlineKeyboardButton("📋 תפריט ראשי", callback_data=CALLBACK_MENU_MAIN)],
             ])
+
         await query.message.reply_text(text, reply_markup=keyboard)
         await telemetry.track_event(context, "menu_support_open", user=user)
         return ConversationHandler.END
@@ -91,6 +113,7 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         group_link = sheets_service.get_expert_group_link(str(user.id))
         from bot.handlers.expert_handlers import build_expert_referral_link
         referral_link = build_expert_referral_link(bot_username, user.id)
+
         if status is None:
             text = (
                 "עדיין לא הגשת מועמדות כמומחה.\n\n"
@@ -210,12 +233,12 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             supporters = row.get("supporters_count", 0)
             text += f"{idx}. {name} — מקום {pos} — תומכים: {supporters}\n"
 
-        text += "\nבחר מומחה לצפייה בפרופיל (שלח /leaderboard כדי לקבל גרסה מלאה)."
+        text += "\nבחר מומחה לצפייה בפרופיל."
         await query.message.reply_text(text, reply_markup=build_leaderboard_keyboard(is_admin(user.id)))
         await telemetry.track_event(context, "leaderboard_open", user=user)
         return ConversationHandler.END
 
-    # פרופיל מומחה ציבורי (pattern handled in callbacks router)
+    # פרופיל מומחה ציבורי
     if data and data.startswith("expert_profile:"):
         _, expert_id = data.split(":", 1)
         expert = sheets_service.get_expert_by_id(expert_id)
@@ -237,10 +260,8 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         await query.message.reply_text(text, reply_markup=keyboard)
         return ConversationHandler.END
 
-    # תמיכה במומחה (support_expert:<id>)
+    # תמיכה במומחה
     if data and data.startswith("support_expert:"):
-        _, expert_id = data.split(":", 1)
-        # נשלח ל־expert_handlers לטיפול
         from bot.handlers.expert_handlers import handle_support_expert_callback
         await handle_support_expert_callback(update, context)
         return ConversationHandler.END
@@ -252,7 +273,7 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         return ConversationHandler.END
 
     # עזרה
-    if data == CALLBACK_HELP_INFO or data == "help_info":
+    if data == CALLBACK_HELP_INFO:
         text = (
             "ℹ️ עזרה ופקודות:\n\n"
             "/start – התחלה\n"
