@@ -1,24 +1,23 @@
 # ===============================
-# Handlers של אדמין (פקודות + callbacks)
+# admin_handlers – פאנל אדמין, חיפוש, רשימות, שידור
 # ===============================
 
 from datetime import datetime
+from typing import Optional, Dict, List
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
 
 from services import sheets_service
 from services.logger_service import log
+from bot.expert_handlers import build_expert_referral_link
+from bot.keyboards import build_admin_panel_keyboard, build_admin_sheets_keyboard, build_main_menu_for_user
 from utils.constants import (
     ADMIN_IDS,
-    ALL_MEMBERS_GROUP_ID,
-    ACTIVISTS_GROUP_ID,
-    EXPERTS_GROUP_ID,
     SUPPORT_GROUP_ID,
+    EXPERTS_GROUP_ID,
     CALLBACK_MENU_MAIN,
-    CALLBACK_MENU_POSITIONS,
-    CALLBACK_ADMIN_PENDING_EXPERTS,
-    CALLBACK_ADMIN_GROUPS,
+    CALLBACK_MENU_ADMIN,
     CALLBACK_ADMIN_SHEETS,
     CALLBACK_ADMIN_SHEETS_INFO,
     CALLBACK_ADMIN_SHEETS_FIX,
@@ -28,86 +27,109 @@ from utils.constants import (
     CALLBACK_ADMIN_EXPORT,
     CALLBACK_ADMIN_QUICK_NAV,
 )
-from bot.keyboards import build_admin_panel_keyboard, build_admin_sheets_keyboard
-from bot.expert_handlers import build_expert_referral_link
 
+
+# ===============================
+# עזר: בדיקת אדמין
+# ===============================
 
 def is_admin(user_id: int) -> bool:
     return str(user_id) in ADMIN_IDS
 
 
-# ---------- פקודות מקומות ----------
+# ===============================
+# מקומות – פקודות אדמין
+# ===============================
 
 async def list_positions(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    positions = sheets_service.get_positions()
-    await log(context, "List positions command", user=update.effective_user, extra={
-        "positions_count": len(positions)
-    })
-
-    if not positions:
-        await update.message.reply_text("אין מקומות מוגדרים כרגע.")
+    user = update.effective_user
+    if not is_admin(user.id):
+        await update.message.reply_text("אין לך הרשאה.")
         return
 
-    text = "📊 רשימת המקומות:\n\n"
+    positions = sheets_service.get_positions()
+    await log(context, "Admin list positions", user=user, extra={"count": len(positions)})
+
+    if not positions:
+        await update.message.reply_text("אין מקומות מוגדרים.")
+        return
+
+    text = "📊 רשימת מקומות:\n\n"
     for pos in positions:
-        status = "תפוס" if pos["expert_user_id"] else "פנוי"
-        text += f"{pos['position_id']}. {pos['title']} – {status}\n"
+        status = "תפוס" if pos.get("expert_user_id") else "פנוי"
+        text += f"{pos.get('position_id')}. {pos.get('title')} – {status}\n"
+
     await update.message.reply_text(text)
 
 
 async def position_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not is_admin(user.id):
+        await update.message.reply_text("אין לך הרשאה.")
+        return
+
     args = update.message.text.split()
     if len(args) < 2:
-        await update.message.reply_text("שימוש: /position <מספר>")
+        await update.message.reply_text("שימוש: /position <id>")
         return
 
     pos_id = args[1]
     pos = sheets_service.get_position(pos_id)
-
-    await log(context, "Position details requested", user=update.effective_user, extra={
-        "position_id": pos_id,
-        "found": bool(pos)
-    })
-
     if not pos:
         await update.message.reply_text("מקום לא נמצא.")
         return
 
+    expert_id = pos.get("expert_user_id")
+    expert_name = "אין"
+    if expert_id:
+        expert = sheets_service.get_expert_by_id(str(expert_id))
+        if expert:
+            expert_name = expert.get("expert_full_name", expert_id)
+
     text = (
-        f"🪪 מקום {pos['position_id']}\n"
-        f"שם: {pos['title']}\n"
-        f"תיאור: {pos['description']}\n"
-        f"מומחה: {pos['expert_user_id'] or 'אין'}\n"
+        f"🪪 מקום {pos.get('position_id')}:\n"
+        f"שם: {pos.get('title')}\n"
+        f"תיאור: {pos.get('description', '')}\n"
+        f"מומחה: {expert_name}\n"
         f"תאריך שיוך: {pos.get('assigned_at', '—')}\n"
     )
     await update.message.reply_text(text)
 
 
 async def assign_position_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
+    user = update.effective_user
+    if not is_admin(user.id):
         await update.message.reply_text("אין לך הרשאה.")
         return
 
     args = update.message.text.split()
     if len(args) < 3:
-        await update.message.reply_text("שימוש: /assign <מקום> <user_id>")
+        await update.message.reply_text("שימוש: /assign <position_id> <user_id>")
         return
 
-    position_id = args[1]
+    pos_id = args[1]
     target_user_id = args[2]
 
-    sheets_service.assign_position(position_id, target_user_id, datetime.utcnow().isoformat())
+    try:
+        if not sheets_service.position_is_free(pos_id):
+            await update.message.reply_text("המקום הזה כבר תפוס.")
+            return
 
-    await log(context, "Position assigned via admin", user=update.effective_user, extra={
-        "position_id": position_id,
-        "assigned_to": target_user_id
-    })
+        now = datetime.utcnow().isoformat()
+        sheets_service.assign_position(position_id=pos_id, user_id=target_user_id, timestamp=now)
 
-    await update.message.reply_text(f"מקום {position_id} שויך ל־{target_user_id}.")
+        await log(context, "Admin assign position", user=user, extra={
+            "position_id": pos_id,
+            "expert_user_id": target_user_id,
+        })
+        await update.message.reply_text(f"מקום {pos_id} שויך ל־user_id {target_user_id}.")
+    except Exception as e:
+        await update.message.reply_text(f"שגיאה בשיוך מקום: {e}")
 
 
 async def reset_position_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
+    user = update.effective_user
+    if not is_admin(user.id):
         await update.message.reply_text("אין לך הרשאה.")
         return
 
@@ -116,76 +138,80 @@ async def reset_position_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text("שימוש: /reset_position <position_id>")
         return
 
-    position_id = args[1].strip()
+    pos_id = args[1]
 
     try:
-        sheets_service.reset_position(position_id)
-        await log(context, "Position reset by admin", user=update.effective_user, extra={
-            "position_id": position_id
-        })
-        await update.message.reply_text(f"מקום {position_id} אופס.")
-    except ValueError:
-        await update.message.reply_text("המקום לא נמצא.")
+        sheets_service.reset_position(pos_id)
+        await log(context, "Admin reset position", user=user, extra={"position_id": pos_id})
+        await update.message.reply_text(f"מקום {pos_id} אופס.")
     except Exception as e:
-        await update.message.reply_text("אירעה שגיאה בעת איפוס המקום.")
-        print("Error in reset_position_cmd:", e)
+        await update.message.reply_text(f"שגיאה באיפוס מקום: {e}")
 
 
 async def reset_all_positions_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
+    user = update.effective_user
+    if not is_admin(user.id):
         await update.message.reply_text("אין לך הרשאה.")
         return
 
     try:
         sheets_service.reset_all_positions()
-        await log(context, "All positions reset by admin", user=update.effective_user)
+        await log(context, "Admin reset all positions", user=user)
         await update.message.reply_text("כל המקומות אופסו.")
     except Exception as e:
-        await update.message.reply_text("אירעה שגיאה בעת איפוס כל המקומות.")
-        print("Error in reset_all_positions_cmd:", e)
+        await update.message.reply_text(f"שגיאה באיפוס כל המקומות: {e}")
 
 
-# ---------- שיטס: validate / fix / info / duplicates ----------
+# ===============================
+# שיטס – פקודות אדמין
+# ===============================
 
 async def fix_sheets(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
+    user = update.effective_user
+    if not is_admin(user.id):
         await update.message.reply_text("אין לך הרשאה.")
         return
 
-    await update.message.reply_text("🔧 מתקן כותרות בגיליונות...")
-
+    await update.message.reply_text("🔧 מריץ תיקון כותרות בגיליונות...")
     try:
         sheets_service.auto_fix_all_sheets()
-        await update.message.reply_text("✔ כל הכותרות תוקנו בהצלחה!")
+        await log(context, "Admin fix sheets", user=user)
+        await update.message.reply_text("✔ תיקון כותרות בוצע בהצלחה.")
     except Exception as e:
-        await update.message.reply_text(f"❌ שגיאה בתיקון הכותרות: {e}")
+        await update.message.reply_text(f"❌ שגיאה בתיקון הכותרות:\n{e}")
 
 
 async def validate_sheets(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
+    user = update.effective_user
+    if not is_admin(user.id):
         await update.message.reply_text("אין לך הרשאה.")
         return
 
     await update.message.reply_text("✔ בודק מבנה גיליונות...")
-
     try:
         sheets_service.validate_all_sheets()
+        await log(context, "Admin validate sheets", user=user)
         await update.message.reply_text("✔ כל הגיליונות תקינים.")
     except Exception as e:
-        await update.message.reply_text(f"❌ בעיה במבנה הגיליונות: {e}")
+        await update.message.reply_text(f"❌ בעיה במבנה הגיליונות:\n{e}")
 
 
 async def sheet_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
+    user = update.effective_user
+    if not is_admin(user.id):
         await update.message.reply_text("אין לך הרשאה.")
         return
 
-    users = sheets_service.get_sheet_info(sheets_service.users_sheet)
-    experts = sheets_service.get_sheet_info(sheets_service.experts_sheet)
-    positions = sheets_service.get_sheet_info(sheets_service.positions_sheet)
+    users_sheet = sheets_service.get_users_sheet()
+    experts_sheet = sheets_service.get_experts_sheet()
+    positions_sheet = sheets_service.get_positions_sheet()
+
+    users = sheets_service.get_sheet_info(users_sheet)
+    experts = sheets_service.get_sheet_info(experts_sheet)
+    positions = sheets_service.get_sheet_info(positions_sheet)
 
     text = (
-        "📊 מידע על הגיליונות:\n\n"
+        "📊 מידע מפורט על הגיליונות:\n\n"
         f"*Users*\n"
         f"- כותרות: {', '.join(users['headers'])}\n"
         f"- שורות: {users['rows']}\n"
@@ -204,37 +230,34 @@ async def sheet_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def clear_expert_duplicates_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
+    user = update.effective_user
+    if not is_admin(user.id):
         await update.message.reply_text("אין לך הרשאה.")
         return
 
-    await update.message.reply_text("🧹 מוחק כפילויות בגיליון Experts...")
-
-    try:
-        deleted = sheets_service.clear_expert_duplicates()
-        await update.message.reply_text(f"✔ נמחקו {deleted} רשומות כפולות ממומחים.")
-    except Exception as e:
-        await update.message.reply_text(f"❌ שגיאה במחיקת כפילויות: {e}")
+    deleted = sheets_service.clear_expert_duplicates()
+    await log(context, "Admin clear expert duplicates", user=user, extra={"deleted": deleted})
+    await update.message.reply_text(f"✔ נמחקו {deleted} כפילויות ממומחים.")
 
 
 async def clear_user_duplicates_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
+    user = update.effective_user
+    if not is_admin(user.id):
         await update.message.reply_text("אין לך הרשאה.")
         return
 
-    await update.message.reply_text("🧹 מוחק כפילויות בגיליון Users...")
-
-    try:
-        deleted = sheets_service.clear_user_duplicates()
-        await update.message.reply_text(f"✔ נמחקו {deleted} רשומות כפולות מתומכים.")
-    except Exception as e:
-        await update.message.reply_text(f"❌ שגיאה במחיקת כפילויות: {e}")
+    deleted = sheets_service.clear_user_duplicates()
+    await log(context, "Admin clear user duplicates", user=user, extra={"deleted": deleted})
+    await update.message.reply_text(f"✔ נמחקו {deleted} כפילויות מתומכים.")
 
 
-# ---------- חיפוש / רשימות ----------
+# ===============================
+# חיפוש / רשימות
+# ===============================
 
 async def find_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
+    user = update.effective_user
+    if not is_admin(user.id):
         await update.message.reply_text("אין לך הרשאה.")
         return
 
@@ -243,25 +266,28 @@ async def find_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("שימוש: /find_user <user_id>")
         return
 
-    user_id = args[1]
-    user = sheets_service.get_supporter_by_id(user_id)
+    target_id = args[1]
+    supporter = sheets_service.get_supporter_by_id(target_id)
 
-    if not user:
-        await update.message.reply_text("משתמש לא נמצא.")
+    if not supporter:
+        await update.message.reply_text("משתמש לא נמצא בגיליון Users.")
         return
 
     text = (
-        f"👤 משתמש {user_id}:\n"
-        f"שם: {user.get('full_name_telegram', '')}\n"
-        f"עיר: {user.get('city', '')}\n"
-        f"אימייל: {user.get('email', '')}\n"
-        f"מצטרף דרך מומחה: {user.get('joined_via_expert_id', '')}\n"
+        f"🧑‍🎓 משתמש {target_id}:\n"
+        f"שם: {supporter.get('full_name_telegram', '')}\n"
+        f"עיר: {supporter.get('city', '')}\n"
+        f"אימייל: {supporter.get('email', '')}\n"
+        f"תפקיד: {supporter.get('role', '')}\n"
+        f"תאריך יצירה: {supporter.get('created_at', '')}\n"
     )
+
     await update.message.reply_text(text)
 
 
 async def find_expert(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
+    user = update.effective_user
+    if not is_admin(user.id):
         await update.message.reply_text("אין לך הרשאה.")
         return
 
@@ -290,7 +316,8 @@ async def find_expert(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def find_position(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
+    user = update.effective_user
+    if not is_admin(user.id):
         await update.message.reply_text("אין לך הרשאה.")
         return
 
@@ -306,23 +333,35 @@ async def find_position(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("מקום לא נמצא.")
         return
 
+    expert_id = pos.get("expert_user_id")
+    expert_name = "אין"
+    if expert_id:
+        expert = sheets_service.get_expert_by_id(str(expert_id))
+        if expert:
+            expert_name = expert.get("expert_full_name", expert_id)
+
     text = (
-        f"🪪 מקום {pos['position_id']}:\n"
-        f"שם: {pos['title']}\n"
-        f"תיאור: {pos['description']}\n"
-        f"מומחה: {pos['expert_user_id'] or 'אין'}\n"
+        f"🪪 מקום {pos.get('position_id')}:\n"
+        f"שם: {pos.get('title')}\n"
+        f"תיאור: {pos.get('description')}\n"
+        f"מומחה: {expert_name}\n"
         f"תאריך שיוך: {pos.get('assigned_at', '—')}\n"
     )
     await update.message.reply_text(text)
 
 
 async def list_approved_experts(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
+    user = update.effective_user
+    if not is_admin(user.id):
         await update.message.reply_text("אין לך הרשאה.")
         return
 
-    rows = sheets_service.experts_sheet.get_all_records()
-    approved = [r for r in rows if r.get("status") == "approved"]
+    sheet = sheets_service.get_experts_sheet()
+    rows = sheet.get_all_records()
+    approved = sorted(
+        [r for r in rows if r.get("status") == "approved"],
+        key=lambda r: int(r.get("expert_position") or 999)
+    )
 
     if not approved:
         await update.message.reply_text("אין מומחים מאושרים.")
@@ -335,15 +374,17 @@ async def list_approved_experts(update: Update, context: ContextTypes.DEFAULT_TY
         position = row.get("expert_position", "")
         text += f"{full_name} – מקום {position}, תחום: {field}\n"
 
-    await update.message.reply_text(text)
+    await update.message.reply_text(text[:4000])
 
 
 async def list_rejected_experts(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
+    user = update.effective_user
+    if not is_admin(user.id):
         await update.message.reply_text("אין לך הרשאה.")
         return
 
-    rows = sheets_service.experts_sheet.get_all_records()
+    sheet = sheets_service.get_experts_sheet()
+    rows = sheet.get_all_records()
     rejected = [r for r in rows if r.get("status") == "rejected"]
 
     if not rejected:
@@ -357,15 +398,17 @@ async def list_rejected_experts(update: Update, context: ContextTypes.DEFAULT_TY
         position = row.get("expert_position", "")
         text += f"{full_name} – מקום {position}, תחום: {field}\n"
 
-    await update.message.reply_text(text)
+    await update.message.reply_text(text[:4000])
 
 
 async def list_supporters(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
+    user = update.effective_user
+    if not is_admin(user.id):
         await update.message.reply_text("אין לך הרשאה.")
         return
 
-    rows = sheets_service.users_sheet.get_all_records()
+    sheet = sheets_service.get_users_sheet()
+    rows = sheet.get_all_records()
 
     if not rows:
         await update.message.reply_text("אין תומכים.")
@@ -377,10 +420,12 @@ async def list_supporters(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = row.get("user_id", "")
         text += f"{full_name} – {user_id}\n"
 
-    await update.message.reply_text(text)
+    await update.message.reply_text(text[:4000])
 
 
-# ---------- callbacks של אישור/דחיית מומחים + admin menu ----------
+# ===============================
+# אישור/דחיית מומחים (callback)
+# ===============================
 
 async def expert_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -413,9 +458,11 @@ async def notify_expert(context: ContextTypes.DEFAULT_TYPE, user_id: str, approv
     referral_link = build_expert_referral_link(bot_username, int(user_id))
     group_link = sheets_service.get_expert_group_link(user_id)
 
+    from utils.constants import CALLBACK_MENU_MAIN, CALLBACK_APPLY_EXPERT
+
     if approved:
         text = (
-            "המועמדות שלך כמומחה אושרה. 🎉\n\n"
+            "המועמדות שלך כמומחה אושרה.\n\n"
             "זהו קישור הבוט האישי שלך לשיתוף:\n"
             f"{referral_link}\n\n"
         )
@@ -444,12 +491,20 @@ async def notify_expert(context: ContextTypes.DEFAULT_TYPE, user_id: str, approv
             [InlineKeyboardButton("📋 פתיחת תפריט ראשי", callback_data=CALLBACK_MENU_MAIN)],
         ])
 
-    await context.bot.send_message(
-        chat_id=int(user_id),
-        text=text,
-        reply_markup=keyboard
-    )
+    try:
+        await context.bot.send_message(
+            chat_id=int(user_id),
+            text=text,
+            reply_markup=keyboard
+        )
+    except Exception as e:
+        # המשתמש אולי חסם את הבוט, או שאין אפשרות לשלוח לו
+        print(f"Failed to notify expert {user_id}: {e}")
 
+
+# ===============================
+# פאנל אדמין – פקודת /admin_menu
+# ===============================
 
 async def admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -480,13 +535,18 @@ async def admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/find_position <id>\n"
         "/list_approved_experts\n"
         "/list_rejected_experts\n"
-        "/list_supporters\n"
+        "/list_supporters\n\n"
+        "שידור:\n"
+        "/broadcast_supporters <טקסט>\n"
+        "/broadcast_experts <טקסט>\n"
     )
 
     await update.message.reply_text(text, reply_markup=build_admin_panel_keyboard())
 
 
-# ---------- תתי־תפריטים של אדמין דרך callbacks ----------
+# ===============================
+# callbacks של אדמין (תתי־תפריטים)
+# ===============================
 
 async def handle_admin_callback(query, context: ContextTypes.DEFAULT_TYPE):
     """
@@ -502,9 +562,13 @@ async def handle_admin_callback(query, context: ContextTypes.DEFAULT_TYPE):
 
     # ניהול גיליונות – תפריט משנה
     if data == CALLBACK_ADMIN_SHEETS:
-        users = sheets_service.get_sheet_info(sheets_service.users_sheet)
-        experts = sheets_service.get_sheet_info(sheets_service.experts_sheet)
-        positions = sheets_service.get_sheet_info(sheets_service.positions_sheet)
+        users_sheet = sheets_service.get_users_sheet()
+        experts_sheet = sheets_service.get_experts_sheet()
+        positions_sheet = sheets_service.get_positions_sheet()
+
+        users = sheets_service.get_sheet_info(users_sheet)
+        experts = sheets_service.get_sheet_info(experts_sheet)
+        positions = sheets_service.get_sheet_info(positions_sheet)
 
         text = (
             "📊 ניהול גיליונות:\n\n"
@@ -518,9 +582,13 @@ async def handle_admin_callback(query, context: ContextTypes.DEFAULT_TYPE):
 
     # מידע על הגיליונות
     if data == CALLBACK_ADMIN_SHEETS_INFO:
-        users = sheets_service.get_sheet_info(sheets_service.users_sheet)
-        experts = sheets_service.get_sheet_info(sheets_service.experts_sheet)
-        positions = sheets_service.get_sheet_info(sheets_service.positions_sheet)
+        users_sheet = sheets_service.get_users_sheet()
+        experts_sheet = sheets_service.get_experts_sheet()
+        positions_sheet = sheets_service.get_positions_sheet()
+
+        users = sheets_service.get_sheet_info(users_sheet)
+        experts = sheets_service.get_sheet_info(experts_sheet)
+        positions = sheets_service.get_sheet_info(positions_sheet)
 
         text = (
             "📊 מידע מפורט על הגיליונות:\n\n"
@@ -591,8 +659,11 @@ async def handle_admin_callback(query, context: ContextTypes.DEFAULT_TYPE):
 
     # יצוא נתונים – טקסט
     if data == CALLBACK_ADMIN_EXPORT:
-        users = sheets_service.users_sheet.get_all_records()
-        experts = sheets_service.experts_sheet.get_all_records()
+        users_sheet = sheets_service.get_users_sheet()
+        experts_sheet = sheets_service.get_experts_sheet()
+
+        users = users_sheet.get_all_records()
+        experts = experts_sheet.get_all_records()
 
         text = (
             "📁 יצוא נתונים (תמציתי):\n\n"
@@ -629,10 +700,13 @@ async def handle_admin_callback(query, context: ContextTypes.DEFAULT_TYPE):
         return
 
 
-# ---------- שידור פשוט לקבוצות (commands) ----------
+# ===============================
+# שידור פשוט לקבוצות (commands)
+# ===============================
 
 async def broadcast_supporters(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
+    user = update.effective_user
+    if not is_admin(user.id):
         await update.message.reply_text("אין לך הרשאה.")
         return
 
@@ -646,12 +720,21 @@ async def broadcast_supporters(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     text = args[1]
-    await context.bot.send_message(chat_id=int(SUPPORT_GROUP_ID), text=text)
-    await update.message.reply_text("הודעה נשלחה לקבוצת התומכים.")
+    try:
+        await context.bot.send_message(
+            chat_id=int(SUPPORT_GROUP_ID),
+            text=text,
+            parse_mode="HTML",
+        )
+        await update.message.reply_text("✔ ההודעה נשלחה לקבוצת התומכים.")
+        await log(context, "Broadcast to supporters", user=user, extra={"text": text})
+    except Exception as e:
+        await update.message.reply_text(f"❌ שגיאה בשליחה: {e}")
 
 
 async def broadcast_experts(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
+    user = update.effective_user
+    if not is_admin(user.id):
         await update.message.reply_text("אין לך הרשאה.")
         return
 
@@ -665,5 +748,13 @@ async def broadcast_experts(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     text = args[1]
-    await context.bot.send_message(chat_id=int(EXPERTS_GROUP_ID), text=text)
-    await update.message.reply_text("הודעה נשלחה לקבוצת המומחים.")
+    try:
+        await context.bot.send_message(
+            chat_id=int(EXPERTS_GROUP_ID),
+            text=text,
+            parse_mode="HTML",
+        )
+        await update.message.reply_text("✔ ההודעה נשלחה לקבוצת המומחים.")
+        await log(context, "Broadcast to experts", user=user, extra={"text": text})
+    except Exception as e:
+        await update.message.reply_text(f"❌ שגיאה בשליחה: {e}")
