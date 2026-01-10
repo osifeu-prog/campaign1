@@ -38,6 +38,7 @@ from bot.admin_handlers import (
     broadcast_experts,
 )
 from services import sheets_service
+from utils.constants import CALLBACK_START_SLIDE, CALLBACK_START_SOCI, CALLBACK_START_FINISH
 
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -89,6 +90,12 @@ async def startup_event():
     application.add_handler(CallbackQueryHandler(
         expert_admin_callback,
         pattern=r"^expert_(approve|reject):"
+    ))
+
+    # callbacks של קרוסלת /start
+    application.add_handler(CallbackQueryHandler(
+        bot_handlers.handle_start_callback,
+        pattern=rf"^{CALLBACK_START_SLIDE}:|^{CALLBACK_START_SOCI}$|^{CALLBACK_START_FINISH}$"
     ))
 
     # אחר כך כל שאר ה־callbacks של התפריטים
