@@ -1,7 +1,6 @@
-﻿# main.py  נקודת כניסה משודרגת עם בדיקות והרשאות Google מפורטות
+# main.py  נקודת כניסה משודרגת עם בדיקות והרשאות Google מפורטות
 
 import hotfixes
-# main.py  נקודת כניסה משודרגת עם בדיקות והרשאות Google מפורטות
 import os
 import sys
 import traceback
@@ -121,7 +120,11 @@ async def _global_error_handler(update, context):
     try:
         import traceback as _tb
         print("❌ Unhandled exception in update handler:", file=sys.stderr)
-        _tb.print_exception(type(context.error), context.error, context.error.__traceback__)
+        try:
+            _tb.print_exception(type(context.error), context.error, context.error.__traceback__)
+        except Exception:
+            print("Error printing exception details", file=sys.stderr)
+
         # Try to notify the user in a friendly way (best-effort)
         try:
             chat_id = None
@@ -159,49 +162,52 @@ def _log_google_auth_issue(exc: Exception):
         print(f"   {msg}", file=sys.stderr)
 
 def validate_env():
-    try:
-        if getattr(services.sheets_service, 'sheets_service', None) and getattr(services.sheets_service.sheets_service, '_degraded', False):
-            application.bot_data['sheets_degraded'] = True
-            print('⚠ Sheets degraded mode detected at startup')
-    except Exception:
-    pass
-
-required_vars = {
-    "TELEGRAM_BOT_TOKEN": TOKEN,
-    "WEBHOOK_URL": WEBHOOK_URL,
-    "GOOGLE_SHEETS_SPREADSHEET_ID": GOOGLE_SHEETS_SPREADSHEET_ID,
-    "GOOGLE_CREDENTIALS_JSON": GOOGLE_CREDENTIALS_JSON,
-}
-
+    """
+    Validate required environment variables and attempt to initialize Google Sheets client.
+    Raises Exception on fatal missing configuration or unrecoverable auth errors.
+    """
+    # Basic required env vars check
+    required_vars = {
+        "TELEGRAM_BOT_TOKEN": TOKEN,
+        "WEBHOOK_URL": WEBHOOK_URL,
+        "GOOGLE_SHEETS_SPREADSHEET_ID": GOOGLE_SHEETS_SPREADSHEET_ID,
+        "GOOGLE_CREDENTIALS_JSON": GOOGLE_CREDENTIALS_JSON,
+    }
     missing = [k for k, v in required_vars.items() if not v]
     if missing:
         raise Exception(f"Missing required ENV variables: {', '.join(missing)}")
 
+    # If sheets_service already marked degraded, propagate flag
+    try:
+        if getattr(sheets_service, "_degraded", False):
+            application.bot_data['sheets_degraded'] = True
+            print('⚠ Sheets degraded mode detected at startup')
+    except Exception:
+        # ignore if application.bot_data not ready yet
+        pass
+
+    # Try to initialize or validate the sheets client
     try:
         if hasattr(sheets_service, "_init_client"):
             sheets_service._init_client()
+        elif hasattr(sheets_service, "smart_validate_sheets"):
+            sheets_service.smart_validate_sheets()
+        else:
+            print("⚠ No sheets init method found; continuing without explicit validation", file=sys.stderr)
+
+        # Quick verification: try to access spreadsheet properties if available
+        sp = getattr(sheets_service, "_spreadsheet", None)
+        if sp and getattr(sp, "_properties", None):
+            title = sp._properties.get("title", "<unknown>")
+            print(f"✔ Google Sheets access verified for spreadsheet: {title}")
         else:
             try:
-                sheets_service.smart_validate_sheets()
+                if sp is not None:
+                    _ = sp.worksheets()
+                    print("✔ Google Sheets access verified (worksheets listed).")
             except Exception as inner_exc:
                 _log_google_auth_issue(inner_exc)
                 raise
-
-        try:
-            sp = getattr(sheets_service, "_spreadsheet", None)
-            if sp and getattr(sp, "_properties", None):
-                title = sp._properties.get("title", "<unknown>")
-                print(f"✔ Google Sheets access verified for spreadsheet: {title}")
-            else:
-                try:
-                    _ = sheets_service._spreadsheet.worksheets()
-                    print("✔ Google Sheets access verified (worksheets listed).")
-                except Exception as inner_exc:
-                    _log_google_auth_issue(inner_exc)
-                    raise
-        except Exception as inner_exc:
-            _log_google_auth_issue(inner_exc)
-            raise
     except Exception as e:
         _log_google_auth_issue(e)
         raise
@@ -214,28 +220,35 @@ required_vars = {
 async def startup_event():
     print("🚀 Starting bot initialization...")
 
+    # Validate environment and Google Sheets access (best-effort)
     try:
         validate_env()
-    try:
-        if getattr(services.sheets_service, 'sheets_service', None) and getattr(services.sheets_service.sheets_service, '_degraded', False):
-            application.bot_data['sheets_degraded'] = True
-            print('⚠ Sheets degraded mode detected at startup')
-    except Exception:
-        pass
         print("✔ ENV validation passed")
     except Exception as e:
         print(f"❌ ENV validation failed: {e}", file=sys.stderr)
         traceback.print_exc()
-        raise
+        # Mark degraded mode but continue startup
+        try:
+            application.bot_data['sheets_degraded'] = True
+            print("⚠ Continuing startup in degraded mode (Sheets unavailable).")
+        except Exception:
+            pass
 
-    print("🔍 Running Smart Validation on Google Sheets...")
+    print("🔍 Running Smart Validation on Google Sheets (best-effort)...")
     try:
-        sheets_service.smart_validate_sheets()
-        print("✔ Sheets validated successfully")
+        if hasattr(sheets_service, "smart_validate_sheets"):
+            sheets_service.smart_validate_sheets()
+            print("✔ Sheets validated successfully")
+        else:
+            print("⚠ smart_validate_sheets not available; skipping detailed validation")
     except Exception as e:
         print("❌ CRITICAL: Smart Validation failed!", file=sys.stderr)
         traceback.print_exc()
         print("⚠️ Continuing startup WITHOUT sheet validation. Be aware some features may fail at runtime.", file=sys.stderr)
+        try:
+            application.bot_data['sheets_degraded'] = True
+        except Exception:
+            pass
 
     print("🔧 Initializing bot handlers...")
 
@@ -247,94 +260,144 @@ async def startup_event():
         print("⚠ Failed to register global error handler:", e, file=sys.stderr)
 
     # ConversationHandler הראשי
-    conv_handler = bot_handlers.get_conversation_handler()
-    application.add_handler(conv_handler)
+    try:
+        conv_handler = bot_handlers.get_conversation_handler()
+        if conv_handler:
+            application.add_handler(conv_handler)
+            print("✔ ConversationHandler registered")
+    except Exception as e:
+        print("⚠ Failed to register ConversationHandler:", e, file=sys.stderr)
 
     # --- Callback handlers בסדר נכון ---
-    application.add_handler(CallbackQueryHandler(
-        expert_admin_callback,
-        pattern=r"^expert_(approve|reject):"
-    ))
+    try:
+        application.add_handler(CallbackQueryHandler(
+            expert_admin_callback,
+            pattern=r"^expert_(approve|reject):"
+        ))
 
-    application.add_handler(CallbackQueryHandler(
-        handle_donation_callback,
-        pattern=rf"^{CALLBACK_DONATE}$"
-    ))
-    application.add_handler(CallbackQueryHandler(handle_copy_wallet_callback, pattern=rf"^{CALLBACK_COPY_WALLET}$"))
-    application.add_handler(CallbackQueryHandler(handle_ton_info_callback, pattern=rf"^{CALLBACK_TON_INFO}$"))
+        application.add_handler(CallbackQueryHandler(
+            handle_donation_callback,
+            pattern=rf"^{CALLBACK_DONATE}$"
+        ))
+        application.add_handler(CallbackQueryHandler(handle_copy_wallet_callback, pattern=rf"^{CALLBACK_COPY_WALLET}$"))
+        application.add_handler(CallbackQueryHandler(handle_ton_info_callback, pattern=rf"^{CALLBACK_TON_INFO}$"))
 
-    application.add_handler(CallbackQueryHandler(
-        handle_experts_pagination,
-        pattern=r"^experts_page:"
-    ))
-    application.add_handler(CallbackQueryHandler(
-        handle_supporters_pagination,
-        pattern=r"^supporters_page:"
-    ))
+        application.add_handler(CallbackQueryHandler(
+            handle_experts_pagination,
+            pattern=r"^experts_page:"
+        ))
+        application.add_handler(CallbackQueryHandler(
+            handle_supporters_pagination,
+            pattern=r"^supporters_page:"
+        ))
 
-    application.add_handler(CallbackQueryHandler(
-        bot_handlers.handle_start_callback_entry,
-        pattern=rf"^{CALLBACK_START_SLIDE}:|^{CALLBACK_START_SOCI}$|^{CALLBACK_START_FINISH}$"
-    ))
+        application.add_handler(CallbackQueryHandler(
+            bot_handlers.handle_start_callback_entry,
+            pattern=rf"^{CALLBACK_START_SLIDE}:|^{CALLBACK_START_SOCI}$|^{CALLBACK_START_FINISH}$"
+        ))
 
-    application.add_handler(CallbackQueryHandler(
-        bot_handlers.handle_menu_callback
-    ))
+        application.add_handler(CallbackQueryHandler(
+            bot_handlers.handle_menu_callback
+        ))
+        print("✔ Callback handlers registered")
+    except Exception as e:
+        print("⚠ Failed to register some callback handlers:", e, file=sys.stderr)
+        traceback.print_exc()
 
     # --- פקודות כלליות ---
-    application.add_handler(CommandHandler("start", bot_handlers.start))
-    application.add_handler(CommandHandler("menu", bot_handlers.menu_command))
-    application.add_handler(CommandHandler("help", bot_handlers.all_commands))
-    application.add_handler(CommandHandler("myid", bot_handlers.my_id))
-    application.add_handler(CommandHandler("groupid", bot_handlers.group_id))
-    application.add_handler(CommandHandler("leaderboard", leaderboard_command))
+    try:
+        application.add_handler(CommandHandler("start", bot_handlers.start))
+        application.add_handler(CommandHandler("menu", bot_handlers.menu_command))
+        application.add_handler(CommandHandler("help", bot_handlers.all_commands))
+        application.add_handler(CommandHandler("myid", bot_handlers.my_id))
+        application.add_handler(CommandHandler("groupid", bot_handlers.group_id))
+        application.add_handler(CommandHandler("leaderboard", leaderboard_command))
+        print("✔ General command handlers registered")
+    except Exception as e:
+        print("⚠ Failed to register general commands:", e, file=sys.stderr)
 
     # --- פקודות אדמין  מקומות ---
-    application.add_handler(CommandHandler("positions", list_positions))
-    application.add_handler(CommandHandler("position", position_details))
-    application.add_handler(CommandHandler("assign", assign_position_cmd))
-    application.add_handler(CommandHandler("reset_position", reset_position_cmd))
-    application.add_handler(CommandHandler("reset_all_positions", reset_all_positions_cmd))
+    try:
+        application.add_handler(CommandHandler("positions", list_positions))
+        application.add_handler(CommandHandler("position", position_details))
+        application.add_handler(CommandHandler("assign", assign_position_cmd))
+        application.add_handler(CommandHandler("reset_position", reset_position_cmd))
+        application.add_handler(CommandHandler("reset_all_positions", reset_all_positions_cmd))
+        print("✔ Admin position commands registered")
+    except Exception as e:
+        print("⚠ Failed to register admin position commands:", e, file=sys.stderr)
 
     # --- פקודות אדמין  שיטס ---
-    application.add_handler(CommandHandler("fix_sheets", fix_sheets))
-    application.add_handler(CommandHandler("validate_sheets", validate_sheets))
-    application.add_handler(CommandHandler("sheet_info", sheet_info))
-    application.add_handler(CommandHandler("clear_expert_duplicates", clear_expert_duplicates_cmd))
-    application.add_handler(CommandHandler("clear_user_duplicates", clear_user_duplicates_cmd))
-    application.add_handler(CommandHandler("backup_sheets", backup_sheets_cmd))
+    try:
+        application.add_handler(CommandHandler("fix_sheets", fix_sheets))
+        application.add_handler(CommandHandler("validate_sheets", validate_sheets))
+        application.add_handler(CommandHandler("sheet_info", sheet_info))
+        application.add_handler(CommandHandler("clear_expert_duplicates", clear_expert_duplicates_cmd))
+        application.add_handler(CommandHandler("clear_user_duplicates", clear_user_duplicates_cmd))
+        application.add_handler(CommandHandler("backup_sheets", backup_sheets_cmd))
+        print("✔ Admin sheets commands registered")
+    except Exception as e:
+        print("⚠ Failed to register admin sheets commands:", e, file=sys.stderr)
 
     # --- פקודות אדמין  חיפוש ורשימות ---
-    application.add_handler(CommandHandler("find_user", find_user))
-    application.add_handler(CommandHandler("find_expert", find_expert))
-    application.add_handler(CommandHandler("find_position", find_position))
-    application.add_handler(CommandHandler("list_approved_experts", list_approved_experts))
-    application.add_handler(CommandHandler("list_rejected_experts", list_rejected_experts))
-    application.add_handler(CommandHandler("list_supporters", list_supporters))
-    application.add_handler(CommandHandler("admin_menu", admin_menu))
+    try:
+        application.add_handler(CommandHandler("find_user", find_user))
+        application.add_handler(CommandHandler("find_expert", find_expert))
+        application.add_handler(CommandHandler("find_position", find_position))
+        application.add_handler(CommandHandler("list_approved_experts", list_approved_experts))
+        application.add_handler(CommandHandler("list_rejected_experts", list_rejected_experts))
+        application.add_handler(CommandHandler("list_supporters", list_supporters))
+        application.add_handler(CommandHandler("admin_menu", admin_menu))
+        print("✔ Admin search/list commands registered")
+    except Exception as e:
+        print("⚠ Failed to register admin search/list commands:", e, file=sys.stderr)
 
     # --- פקודות אדמין  שידור ---
-    application.add_handler(CommandHandler("broadcast_supporters", broadcast_supporters))
-    application.add_handler(CommandHandler("broadcast_experts", broadcast_experts))
+    try:
+        application.add_handler(CommandHandler("broadcast_supporters", broadcast_supporters))
+        application.add_handler(CommandHandler("broadcast_experts", broadcast_experts))
+        print("✔ Broadcast commands registered")
+    except Exception as e:
+        print("⚠ Failed to register broadcast commands:", e, file=sys.stderr)
 
     # --- פקודות אדמין  Monitoring ---
-    application.add_handler(CommandHandler("dashboard", dashboard_command))
-    application.add_handler(CommandHandler("hourly_stats", hourly_stats_command))
-    application.add_handler(CommandHandler("export_metrics", export_metrics_command))
+    try:
+        application.add_handler(CommandHandler("dashboard", dashboard_command))
+        application.add_handler(CommandHandler("hourly_stats", hourly_stats_command))
+        application.add_handler(CommandHandler("export_metrics", export_metrics_command))
+        print("✔ Monitoring commands registered")
+    except Exception as e:
+        print("⚠ Failed to register monitoring commands:", e, file=sys.stderr)
 
     # --- תרומות ---
-    application.add_handler(CommandHandler("check_donation", check_donation_status))
+    try:
+        application.add_handler(CommandHandler("check_donation", check_donation_status))
+        print("✔ Donation commands registered")
+    except Exception as e:
+        print("⚠ Failed to register donation commands:", e, file=sys.stderr)
 
     # --- פקודות לא מוכרות ---
-    application.add_handler(MessageHandler(filters.COMMAND, bot_handlers.unknown_command))
+    try:
+        application.add_handler(MessageHandler(filters.COMMAND, bot_handlers.unknown_command))
+    except Exception as e:
+        print("⚠ Failed to register unknown command handler:", e, file=sys.stderr)
 
     # --- image handlers (photos / animations) enqueued to JobQueue ---
-    application.add_handler(MessageHandler(filters.PHOTO, image_handlers.handle_photo_message))
-    application.add_handler(MessageHandler(filters.ANIMATION | filters.Document.IMAGE, image_handlers.handle_animation_message))
+    try:
+        application.add_handler(MessageHandler(filters.PHOTO, image_handlers.handle_photo_message))
+        application.add_handler(MessageHandler(filters.ANIMATION | filters.Document.IMAGE, image_handlers.handle_animation_message))
+        print("✔ Image handlers registered")
+    except Exception as e:
+        print("⚠ Failed to register image handlers:", e, file=sys.stderr)
 
     # --- הפעלת הבוט ---
-    await application.initialize()
-    await application.start()
+    try:
+        await application.initialize()
+        await application.start()
+    except Exception as e:
+        print(f"❌ Failed to initialize/start application: {e}", file=sys.stderr)
+        traceback.print_exc()
+        raise
 
     # ✅ הגדרת Webhook
     try:
@@ -357,27 +420,31 @@ async def startup_event():
         traceback.print_exc()
 
     # הגדרת Cleanup Job (אם JobQueue זמין)
-    from datetime import time
-    if getattr(application, "job_queue", None) is not None:
-        try:
+    try:
+        from datetime import time as _time
+        if getattr(application, "job_queue", None) is not None:
             application.job_queue.run_daily(
                 cleanup_monitoring_job,
-                time=time(hour=0, minute=5)
+                time=_time(hour=0, minute=5)
             )
             print("✔ Cleanup job scheduled with JobQueue")
-        except Exception as e:
-            print(f"⚠ Failed to schedule cleanup job: {e}", file=sys.stderr)
-    else:
-        print("⚠ JobQueue not available. Skipping scheduled cleanup job.", file=sys.stderr)
+        else:
+            print("⚠ JobQueue not available. Skipping scheduled cleanup job.", file=sys.stderr)
+    except Exception as e:
+        print(f"⚠ Failed to schedule cleanup job: {e}", file=sys.stderr)
 
     print("🤖 Bot initialized and running!")
 
+# פונקציית ניקוי מתוזמנת
 async def cleanup_monitoring_job(context):
     """
     ניקוי נתונים ישנים - רץ פעם ביום
     """
-    monitoring.cleanup_old_data(days_to_keep=7)
-    print("✔ Monitoring data cleanup completed")
+    try:
+        monitoring.cleanup_old_data(days_to_keep=7)
+        print("✔ Monitoring data cleanup completed")
+    except Exception as e:
+        print("⚠ Cleanup job failed:", e, file=sys.stderr)
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -443,9 +510,15 @@ async def health_check():
     """
     בדיקת בריאות לשימוש Railway
     """
+    bot_username = None
+    try:
+        bot_username = application.bot.username if application and application.bot else None
+    except Exception:
+        bot_username = None
+
     return {
         "status": "healthy",
-        "bot_username": application.bot.username if application.bot else None,
+        "bot_username": bot_username,
         "metrics": {
             "total_users": monitoring.metrics.total_users,
             "messages_today": monitoring.metrics.messages_today,
@@ -457,16 +530,23 @@ async def root():
     """
     עמוד בית
     """
+    bot_username = None
+    try:
+        bot_username = application.bot.username if application and application.bot else None
+    except Exception:
+        bot_username = None
+
     return {
         "service": "Campaign1 Bot",
         "version": "2.0.0",
         "status": "running",
-        "bot": application.bot.username if application.bot else None,
+        "bot": bot_username,
     }
-# Prevent duplicate ConversationHandler registration
-def _conversation_handler_registered(app, handler_type_name="ConversationHandler"):
+
+# Prevent duplicate ConversationHandler registration (utility)
+def _conversation_handler_registered(app_obj, handler_type_name="ConversationHandler"):
     try:
-        for group_handlers in app.handlers.values():
+        for group_handlers in getattr(app_obj, "handlers", {}).values():
             for h in group_handlers:
                 if type(h).__name__ == handler_type_name:
                     return True
@@ -474,20 +554,13 @@ def _conversation_handler_registered(app, handler_type_name="ConversationHandler
         pass
     return False
 
-# Add conv_handler only if not already registered
+# Defensive registration at module import time (if needed)
 try:
-    conv_handler = bot_handlers.get_conversation_handler()
     if not _conversation_handler_registered(application):
-        application.add_handler(conv_handler)
-    else:
-        print("✔ ConversationHandler already registered; skipping duplicate registration")
+        conv_handler = bot_handlers.get_conversation_handler()
+        if conv_handler:
+            application.add_handler(conv_handler)
+            print("✔ ConversationHandler registered at import time")
 except Exception:
-    # If bot_handlers or conv_handler not available at import time, skip and rely on normal flow
+    # If bot_handlers or conv_handler not available at import time, skip and rely on startup registration
     pass
-
-
-
-
-
-
-
