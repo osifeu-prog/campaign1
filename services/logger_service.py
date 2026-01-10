@@ -1,3 +1,4 @@
+# services/logger_service.py
 import os
 import sys
 import traceback
@@ -53,7 +54,7 @@ async def log(
         f"=================="
     )
 
-    # הדפסה ל־stdout (רלוונטי ל־Railway logs)
+    # הדפסה ל־stdout (Railway logs)
     print(final_message, file=sys.stdout)
 
     if LOG_GROUP_ID:
