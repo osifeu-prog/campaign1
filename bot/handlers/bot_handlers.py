@@ -1,106 +1,82 @@
-# bot/handlers/bot_handlers.py
-# Router ראשי ומשלבים ל־ConversationHandler
-from telegram import Update, CallbackQuery
-from telegram.ext import (
-    ContextTypes,
-    ConversationHandler,
-    CommandHandler,
-    MessageHandler,
-    CallbackQueryHandler,
-    filters,
-)
+﻿# bot/handlers/bot_handlers.py
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 
-from bot.handlers import supporter_handlers, expert_handlers
-from bot.states import (
-    SUPPORTER_NAME,
-    SUPPORTER_CITY,
-    SUPPORTER_EMAIL,
-    SUPPORTER_PHONE,
-    SUPPORTER_FEEDBACK,
-    EXPERT_NAME,
-    EXPERT_FIELD,
-    EXPERT_EXPERIENCE,
-    EXPERT_POSITION,
-    EXPERT_LINKS,
-    EXPERT_WHY,
-)
-from bot.flows.start_flow import handle_start, handle_start_callback
-from bot.flows.menu_flow import handle_menu_command, handle_menu_callback
-from bot.core.locale_service import locale_service
-from services.logger_service import log
-from utils.constants import (
-    CALLBACK_APPLY_SUPPORTER,
-    CALLBACK_APPLY_EXPERT,
-    CALLBACK_START_SLIDE,
-    CALLBACK_START_SOCI,
-    CALLBACK_START_FINISH,
-    CALLBACK_MENU_MAIN,
-)
+def footer_keyboard(rows):
+    footer = [InlineKeyboardButton("📋 פקודות", callback_data="show_all_commands")]
+    rows.append(footer)
+    return InlineKeyboardMarkup(rows)
+
+def main_menu_keyboard():
+    rows = [
+        [InlineKeyboardButton("הגש מועמדות כמומחה", callback_data="apply_expert")],
+        [InlineKeyboardButton("הרשם כתומך", callback_data="apply_supporter")],
+        [InlineKeyboardButton("טבלת מובילים", callback_data="leaderboard")],
+    ]
+    return footer_keyboard(rows)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await handle_start(update, context)
+    try:
+        update_id = getattr(update, "update_id", None)
+        if update_id is not None:
+            last = context.chat_data.get("last_handled_update_id")
+            if last == update_id:
+                return
+            context.chat_data["last_handled_update_id"] = update_id
+    except Exception:
+        pass
 
-async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await handle_menu_command(update, context)
+    text = (
+        "ברוך הבא לתנועת אחדות.\n\n"
+        "אני הבוט שדרכו מצטרפים, נרשמים כתומכים ומגישים מועמדות כמומחים.\n\n"
+        "איך תרצה להצטרף?"
+    )
+    kb = main_menu_keyboard()
+    if update.callback_query:
+        try:
+            await update.callback_query.message.edit_text(text, reply_markup=kb)
+            await update.callback_query.answer()
+            return
+        except Exception:
+            pass
+    await update.message.reply_text(text, reply_markup=kb)
 
 async def all_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await log(context, "All commands requested", user=update.effective_user)
     text = (
-        "/start – התחלה מחדש\n"
-        "/menu – פתיחת תפריט ראשי\n"
-        "/help – רשימת פקודות\n"
-        "/myid – הצגת ה־user_id שלך\n"
-        "/groupid – הצגת group id (בקבוצה)\n"
+        "📋 רשימת פקודות ותפריטים מלאה:\n\n"
+        "/start  התחלה\n"
+        "/menu  תפריט ראשי\n"
+        "/leaderboard  טבלת מובילים\n"
+        "/myid  הצגת ה‑user_id שלך\n"
+        "/groupid  הצגת group id (בקבוצה)\n"
+        "/positions  רשימת מקומות (admin)\n"
+        "/validate_sheets  בדיקת Google Sheets (admin)\n"
+        "/fix_sheets  תיקון אוטומטי של גיליונות (admin)\n"
+        "/backup_sheets  גיבוי גיליונות (admin)\n"
+        "/clear_user_duplicates  הסרת כפילויות תומכים (admin)\n"
+        "/clear_expert_duplicates  הסרת כפילויות מומחים (admin)\n"
+        "/broadcast_supporters  שידור לתומכים (admin)\n"
+        "/broadcast_experts  שידור למומחים (admin)\n"
+        "/help  עזרה\n\n"
+        "תפריטים אינטראקטיביים מופיעים תחת /menu. ניתן גם להשתמש בכפתורים בתוך ההודעות."
     )
+    if update.callback_query:
+        try:
+            await update.callback_query.message.edit_text(text)
+            await update.callback_query.answer()
+            return
+        except Exception:
+            pass
     await update.message.reply_text(text)
 
-async def my_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    await log(context, "my_id requested", user=update.effective_user)
-    await update.message.reply_text(f"user_id שלך: {user_id}")
-
-async def group_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat = update.effective_chat
-    await log(context, "group_id requested", user=update.effective_user, extra={"chat_id": chat.id})
-    await update.message.reply_text(f"group/chat id: {chat.id}")
-
 async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    lang = locale_service.detect_language(user.language_code)
-    await log(context, "Unknown command", user=user, extra={"text": update.message.text})
-    await update.message.reply_text(locale_service.t("unknown_command", lang=lang))
+    await update.message.reply_text("הפקודה הזו לא מוכרת.\nנסה /menu כדי לראות את כל האפשרויות.")
 
-async def handle_start_callback_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await handle_start_callback(update, context)
-
-def get_conversation_handler() -> ConversationHandler:
-    """
-    ConversationHandler עם entry_points שמתחילים את זרימות ההרשמה
-    (הרשמת תומך / הגשת מועמדות כמומחה).
-    """
-    return ConversationHandler(
-        entry_points=[
-            CallbackQueryHandler(handle_menu_callback, pattern=f"^{CALLBACK_APPLY_SUPPORTER}$"),
-            CallbackQueryHandler(handle_menu_callback, pattern=f"^{CALLBACK_APPLY_EXPERT}$"),
-            CommandHandler("start", start),
-        ],
-        states={
-            SUPPORTER_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_handlers.supporter_name)],
-            SUPPORTER_CITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_handlers.supporter_city)],
-            SUPPORTER_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_handlers.supporter_email)],
-            SUPPORTER_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_handlers.supporter_phone)],
-            SUPPORTER_FEEDBACK: [MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_handlers.supporter_feedback)],
-
-            EXPERT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, expert_handlers.expert_name)],
-            EXPERT_FIELD: [MessageHandler(filters.TEXT & ~filters.COMMAND, expert_handlers.expert_field)],
-            EXPERT_EXPERIENCE: [MessageHandler(filters.TEXT & ~filters.COMMAND, expert_handlers.expert_experience)],
-            EXPERT_POSITION: [MessageHandler(filters.TEXT & ~filters.COMMAND, expert_handlers.expert_position)],
-            EXPERT_LINKS: [MessageHandler(filters.TEXT & ~filters.COMMAND, expert_handlers.expert_links)],
-            EXPERT_WHY: [MessageHandler(filters.TEXT & ~filters.COMMAND, expert_handlers.expert_why)],
-        },
-        fallbacks=[
-            CommandHandler("start", start),
-            CommandHandler("menu", menu_command),
-        ],
-        allow_reentry=True,
+def get_conversation_handler():
+    conv = ConversationHandler(
+        entry_points=[CommandHandler("start", start)],
+        states={},
+        fallbacks=[CommandHandler("help", all_commands)],
+        per_message=False,
     )
+    return conv

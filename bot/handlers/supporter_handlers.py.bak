@@ -1,4 +1,4 @@
-# bot/handlers/supporter_handlers.py
+﻿# bot/handlers/supporter_handlers.py
 import re
 from datetime import datetime
 
@@ -27,7 +27,7 @@ async def supporter_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await log(context, "Supporter name entered", user=update.effective_user, extra={
         "supporter_full_name": context.user_data["supporter_full_name"]
     })
-    await update.message.reply_text("באיזו עיר אתה גר?")
+    await update.message.reply_text("×‘×گ×™×–×• ×¢×™×¨ ×گ×ھ×” ×’×¨?")
     return SUPPORTER_CITY
 
 async def supporter_city(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -35,15 +35,15 @@ async def supporter_city(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await log(context, "Supporter city entered", user=update.effective_user, extra={
         "supporter_city": context.user_data["supporter_city"]
     })
-    await update.message.reply_text("כתובת אימייל (אפשר לכתוב 'דלג'):")
+    await update.message.reply_text("×›×ھ×•×‘×ھ ×گ×™×‍×™×™×œ (×گ×¤×©×¨ ×œ×›×ھ×•×‘ '×“×œ×’'):")
     return SUPPORTER_EMAIL
 
 async def supporter_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
 
-    if text.lower() not in ["דלג", "skip", ""]:
+    if text.lower() not in ["×“×œ×’", "skip", ""]:
         if not EMAIL_REGEX.match(text):
-            await update.message.reply_text("האימייל לא נראה תקין. נסה שוב או כתוב 'דלג'.")
+            await update.message.reply_text("×”×گ×™×‍×™×™×œ ×œ×گ × ×¨×گ×” ×ھ×§×™×ں. × ×،×” ×©×•×‘ ×گ×• ×›×ھ×•×‘ '×“×œ×’'.")
             return SUPPORTER_EMAIL
         context.user_data["supporter_email"] = text
     else:
@@ -52,15 +52,15 @@ async def supporter_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await log(context, "Supporter email entered", user=update.effective_user, extra={
         "supporter_email": context.user_data["supporter_email"]
     })
-    await update.message.reply_text("מה מספר הטלפון שלך? (אפשר 'דלג')")
+    await update.message.reply_text("×‍×” ×‍×،×¤×¨ ×”×ک×œ×¤×•×ں ×©×œ×ڑ? (×گ×¤×©×¨ '×“×œ×’')")
     return SUPPORTER_PHONE
 
 async def supporter_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
 
-    if text.lower() not in ["דלג", "skip", ""]:
+    if text.lower() not in ["×“×œ×’", "skip", ""]:
         if not PHONE_REGEX.match(text):
-            await update.message.reply_text("מספר הטלפון לא נראה תקין. נסה שוב או כתוב 'דלג'.")
+            await update.message.reply_text("×‍×،×¤×¨ ×”×ک×œ×¤×•×ں ×œ×گ × ×¨×گ×” ×ھ×§×™×ں. × ×،×” ×©×•×‘ ×گ×• ×›×ھ×•×‘ '×“×œ×’'.")
             return SUPPORTER_PHONE
         context.user_data["supporter_phone"] = text
     else:
@@ -69,7 +69,7 @@ async def supporter_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await log(context, "Supporter phone entered", user=update.effective_user, extra={
         "supporter_phone": context.user_data["supporter_phone"]
     })
-    await update.message.reply_text("מה גרם לך להצטרף לתנועה?")
+    await update.message.reply_text("×‍×” ×’×¨×‌ ×œ×ڑ ×œ×”×¦×ک×¨×£ ×œ×ھ× ×•×¢×”?")
     return SUPPORTER_FEEDBACK
 
 async def supporter_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -78,7 +78,7 @@ async def supporter_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if "created_at" not in context.user_data:
         context.user_data["created_at"] = datetime.utcnow().isoformat()
 
-    # אם start_param הכיל expert_<id> או מספר referrer, נשמור זאת
+    # ×گ×‌ start_param ×”×›×™×œ expert_<id> ×گ×• ×‍×،×¤×¨ referrer, × ×©×‍×•×¨ ×–×گ×ھ
     start_param = context.user_data.get("start_param", "")
     referrer = ""
     joined_via_expert_id = ""
@@ -102,23 +102,24 @@ async def supporter_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "phone": context.user_data.get("supporter_phone", ""),
     }
 
-    sheets_service.append_user_row(user_row)
+    sheets_service.append_user(user_row)
     await log(context, "Supporter registered", user=update.effective_user, extra=user_row)
 
     personal_link = build_personal_link(context.bot.username, context.user_data["user_id"])
 
     text = (
-        "תודה שנרשמת כתומך!\n\n"
-        "זהו קישור אישי שתוכל לשתף עם חברים ומשפחה:\n"
+        "×ھ×•×“×” ×©× ×¨×©×‍×ھ ×›×ھ×•×‍×ڑ!\n\n"
+        "×–×”×• ×§×™×©×•×¨ ×گ×™×©×™ ×©×ھ×•×›×œ ×œ×©×ھ×£ ×¢×‌ ×—×‘×¨×™×‌ ×•×‍×©×¤×—×”:\n"
         f"{personal_link}\n\n"
-        "מה תרצה לעשות עכשיו?"
+        "×‍×” ×ھ×¨×¦×” ×œ×¢×©×•×ھ ×¢×›×©×™×•?"
     )
 
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📣 לשתף את הקישור שלי", url=personal_link)],
-        [InlineKeyboardButton("🧠 להגיש מועמדות כמומחה", callback_data=CALLBACK_APPLY_EXPERT)],
-        [InlineKeyboardButton("📋 פתיחת תפריט ראשי", callback_data=CALLBACK_MENU_MAIN)],
+        [InlineKeyboardButton("ًں“£ ×œ×©×ھ×£ ×گ×ھ ×”×§×™×©×•×¨ ×©×œ×™", url=personal_link)],
+        [InlineKeyboardButton("ًں§  ×œ×”×’×™×© ×‍×•×¢×‍×“×•×ھ ×›×‍×•×‍×—×”", callback_data=CALLBACK_APPLY_EXPERT)],
+        [InlineKeyboardButton("ًں“‹ ×¤×ھ×™×—×ھ ×ھ×¤×¨×™×ک ×¨×گ×©×™", callback_data=CALLBACK_MENU_MAIN)],
     ])
 
     await update.message.reply_text(text, reply_markup=keyboard)
     return ConversationHandler.END
+
