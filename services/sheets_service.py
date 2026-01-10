@@ -10,7 +10,6 @@ from functools import wraps
 import gspread
 from google.oauth2.service_account import Credentials
 
-# Constants expected from utils/constants or env
 GOOGLE_SHEETS_SPREADSHEET_ID = os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID", "")
 USERS_SHEET_NAME = os.getenv("USERS_SHEET_NAME", "Telegram Leads")
 EXPERTS_SHEET_NAME = os.getenv("EXPERTS_SHEET_NAME", "Experts")
@@ -47,23 +46,17 @@ class SheetsService:
         self._degraded = False
 
     def _init_client(self):
-        """
-        Initialize gspread client and open spreadsheet.
-        If something fails (auth, rate limit, etc.), mark degraded and do not crash startup.
-        """
         if self._client and self._spreadsheet:
             return
         try:
             creds_json = os.getenv("GOOGLE_CREDENTIALS_JSON", "")
             if not creds_json:
                 raise Exception("GOOGLE_CREDENTIALS_JSON not set")
-
             try:
                 info = json.loads(creds_json)
             except Exception:
                 with open(creds_json, "r", encoding="utf-8") as fh:
                     info = json.load(fh)
-
             scopes = [
                 "https://www.googleapis.com/auth/spreadsheets",
                 "https://www.googleapis.com/auth/drive",
@@ -193,11 +186,13 @@ class SheetsService:
         cols = len(headers)
         return {"headers": headers, "rows": rows, "cols": cols}
 
+    # ========== Append / update ==========
+
     @retry(Exception, tries=3, delay=0.5)
     def append_user(self, user_record: Dict[str, Any]):
         sheet = self.get_users_sheet()
         if not sheet:
-            raise Exception("Users sheet not available (degraded mode or init failed)")
+            raise Exception("Users sheet not available")
         headers = sheet.row_values(1)
         row = [user_record.get(h, "") for h in headers]
         with _lock:
@@ -207,7 +202,7 @@ class SheetsService:
     def append_expert(self, expert_record: Dict[str, Any]):
         sheet = self.get_experts_sheet()
         if not sheet:
-            raise Exception("Experts sheet not available (degraded mode or init failed)")
+            raise Exception("Experts sheet not available")
         headers = sheet.row_values(1)
         row = [expert_record.get(h, "") for h in headers]
         with _lock:
@@ -232,6 +227,8 @@ class SheetsService:
                     sheet.update_cell(idx, col, status)
                 return True
         return False
+
+    # ========== Queries ==========
 
     def get_expert_by_id(self, user_id: str) -> Optional[Dict[str, Any]]:
         sheet = self.get_experts_sheet()
@@ -275,6 +272,8 @@ class SheetsService:
         if not pos:
             return True
         return not bool(pos.get("expert_user_id"))
+
+    # ========== Positions ==========
 
     @retry(Exception, tries=3, delay=0.5)
     def assign_position(self, position_id: str, user_id: str, timestamp: Optional[str] = None):
@@ -331,6 +330,8 @@ class SheetsService:
                     sheet.update_cell(idx, headers.index("assigned_at") + 1, "")
         return True
 
+    # ========== Duplicates / leaderboard ==========
+
     @retry(Exception, tries=3, delay=0.5)
     def clear_user_duplicates(self) -> int:
         sheet = self.get_users_sheet()
@@ -386,13 +387,7 @@ class SheetsService:
         )
         return sorted_rows
 
-    def auto_fix_all_sheets(self):
-        self.smart_validate_sheets()
-
-    def validate_all_sheets(self):
-        self.smart_validate_sheets()
-
-    # ---------- Compatibility helper methods used by flows/admin ----------
+    # ========== Helper/compat methods used ע"י flows/admin ==========
 
     def get_expert_status(self, user_id: str) -> Optional[str]:
         expert = self.get_expert_by_id(user_id)
@@ -440,11 +435,17 @@ class SheetsService:
                     return True
         return False
 
+    def auto_fix_all_sheets(self):
+        self.smart_validate_sheets()
+
+    def validate_all_sheets(self):
+        self.smart_validate_sheets()
+
 
 sheets_service = SheetsService()
 
 # ===============================
-# Compatibility aliases for older callers
+# Compatibility aliases ברמת המודול
 # ===============================
 
 def append_user(user_record: Dict[str, Any]):
@@ -459,7 +460,6 @@ def append_user_row(user_record: Dict[str, Any]):
 def append_expert_row(expert_record: Dict[str, Any]):
     return sheets_service.append_expert(expert_record)
 
-# module-level aliases (so code like `from services import sheets_service` still works)
 def get_supporter_by_id(user_id: str) -> Optional[Dict[str, Any]]:
     return sheets_service.get_supporter_by_id(user_id)
 
