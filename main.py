@@ -14,7 +14,6 @@ from telegram.ext import (
     filters,
 )
 
-# --- ייבוא מודולים מהבוט ---
 from bot import bot_handlers
 from bot.admin_handlers import (
     list_positions,
@@ -35,18 +34,14 @@ from bot.admin_handlers import (
     list_supporters,
     admin_menu,
     expert_admin_callback,
+    broadcast_supporters,
+    broadcast_experts,
 )
-
-# --- שירותי שיטס ---
 from services import sheets_service
 
 
-# ===============================
-# הגדרות בסיס
-# ===============================
-
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # למשל: https://campaign1-production.up.railway.app/webhook
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # לדוגמה: https://campaign1-production.up.railway.app/webhook
 
 app = FastAPI()
 
@@ -57,10 +52,6 @@ application = (
 )
 
 
-# ===============================
-# בדיקת ENV
-# ===============================
-
 def validate_env():
     if not TOKEN:
         raise Exception("Missing TELEGRAM_BOT_TOKEN")
@@ -68,17 +59,13 @@ def validate_env():
         raise Exception("Missing GOOGLE_SHEETS_SPREADSHEET_ID")
 
 
-# ===============================
-# Startup
-# ===============================
-
 @app.on_event("startup")
 async def startup_event():
     """
-    פונקציית האתחול של הבוט:
+    אתחול הבוט:
     - בדיקת ENV
     - Smart Validation לגיליונות
-    - טעינת כל ה־handlers
+    - רישום כל ה־handlers
     - הפעלת הבוט
     """
 
@@ -87,7 +74,6 @@ async def startup_event():
     print("🚀 Starting bot...")
     print("🔍 Running Smart Validation on Google Sheets...")
 
-    # --- מנגנון תיקוף חכם ---
     sheets_service.smart_validate_sheets()
 
     print("✔ Sheets validated successfully")
@@ -99,18 +85,19 @@ async def startup_event():
 
     # --- סדר נכון של CallbackQueryHandlers ---
 
-    # 1) קודם callbacks של אישור/דחיית מומחים
+    # קודם callbacks של אישור/דחיית מומחים
     application.add_handler(CallbackQueryHandler(
         expert_admin_callback,
         pattern=r"^expert_(approve|reject):"
     ))
 
-    # 2) אחר כך כל שאר ה־callbacks של התפריטים
+    # אחר כך כל שאר ה־callbacks של התפריטים
     application.add_handler(CallbackQueryHandler(
         bot_handlers.handle_menu_callback
     ))
 
     # --- פקודות כלליות ---
+    application.add_handler(CommandHandler("start", bot_handlers.start))
     application.add_handler(CommandHandler("menu", bot_handlers.menu_command))
     application.add_handler(CommandHandler("help", bot_handlers.all_commands))
     application.add_handler(CommandHandler("myid", bot_handlers.my_id))
@@ -139,6 +126,10 @@ async def startup_event():
     application.add_handler(CommandHandler("list_supporters", list_supporters))
     application.add_handler(CommandHandler("admin_menu", admin_menu))
 
+    # --- פקודות אדמין – שידור ---
+    application.add_handler(CommandHandler("broadcast_supporters", broadcast_supporters))
+    application.add_handler(CommandHandler("broadcast_experts", broadcast_experts))
+
     # --- פקודות לא מוכרות ---
     application.add_handler(MessageHandler(filters.COMMAND, bot_handlers.unknown_command))
 
@@ -148,10 +139,6 @@ async def startup_event():
 
     print("🤖 Bot initialized and running!")
 
-
-# ===============================
-# Webhook endpoint
-# ===============================
 
 @app.post("/webhook")
 async def telegram_webhook(request: Request):
