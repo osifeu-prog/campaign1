@@ -1,4 +1,4 @@
-# main.py – נקודת כניסה משודרגת (מתוקן: webhook path handling + request logging + image handlers)
+# main.py – נקודת כניסה משודרגת (כולל JobQueue usage עבור עיבוד מדיה ברקע)
 import os
 import sys
 import traceback
@@ -225,7 +225,7 @@ async def startup_event():
     # --- פקודות לא מוכרות ---
     application.add_handler(MessageHandler(filters.COMMAND, bot_handlers.unknown_command))
 
-    # --- image handlers (photos / animations) ---
+    # --- image handlers (photos / animations) enqueued to JobQueue ---
     application.add_handler(MessageHandler(filters.PHOTO, image_handlers.handle_photo_message))
     application.add_handler(MessageHandler(filters.ANIMATION | filters.Document.IMAGE, image_handlers.handle_animation_message))
 
