@@ -19,7 +19,6 @@ from utils.constants import (
     ROLE_EXPERT,
     CALLBACK_MENU_MAIN,
     CALLBACK_MENU_EXPERT,
-    CALLBACK_APPLY_EXPERT,
     LOG_GROUP_ID,
     MAX_POSITIONS,
 )
@@ -28,9 +27,6 @@ from services.logger_service import log
 
 
 def build_expert_referral_link(bot_username: str, user_id: int) -> str:
-    """
-    קישור אישי של מומחה (עם start=expert_<user_id>)
-    """
     return f"https://t.me/{bot_username}?start=expert_{user_id}"
 
 
