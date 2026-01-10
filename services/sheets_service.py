@@ -1,4 +1,4 @@
-﻿# services/sheets_service.py
+# services/sheets_service.py
 import os
 import time
 import json
@@ -10,6 +10,7 @@ from functools import wraps
 import gspread
 from google.oauth2.service_account import Credentials
 
+
 # Constants expected from utils/constants or env
 GOOGLE_SHEETS_SPREADSHEET_ID = os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID", "")
 USERS_SHEET_NAME = os.getenv("USERS_SHEET_NAME", "Telegram Leads")
@@ -17,6 +18,7 @@ EXPERTS_SHEET_NAME = os.getenv("EXPERTS_SHEET_NAME", "Experts")
 POSITIONS_SHEET_NAME = os.getenv("POSITIONS_SHEET_NAME", "Positions")
 
 SPREADSHEET_ID = GOOGLE_SHEETS_SPREADSHEET_ID
+
 
 def retry(exceptions, tries=3, delay=1.0, backoff=2.0):
     def deco_retry(f):
@@ -34,42 +36,54 @@ def retry(exceptions, tries=3, delay=1.0, backoff=2.0):
         return f_retry
     return deco_retry
 
+
 _lock = threading.Lock()
+
 
 class SheetsService:
     def __init__(self):
         self._client = None
         self._spreadsheet = None
         self.SPREADSHEET_ID = SPREADSHEET_ID
+        self._degraded = False
 
     def _init_client(self):
-        try:
-# Degraded-mode guard: if Sheets API fails (rate limit etc.), set _degraded and continue
+        """
+        Initialize gspread client and open spreadsheet.
+        If something fails (auth, rate limit, etc.), mark degraded and do not crash startup.
+        """
         if self._client and self._spreadsheet:
             return
-        creds_json = os.getenv("GOOGLE_CREDENTIALS_JSON", "")
-        if not creds_json:
-            raise Exception("GOOGLE_CREDENTIALS_JSON not set")
         try:
-            info = json.loads(creds_json)
-        except Exception:
-            with open(creds_json, "r", encoding="utf-8") as fh:
-                info = json.load(fh)
-        scopes = [
-            "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/drive",
-        ]
-        credentials = Credentials.from_service_account_info(info, scopes=scopes)
-        self._client = gspread.authorize(credentials)
-        if not self.SPREADSHEET_ID:
-            raise Exception("GOOGLE_SHEETS_SPREADSHEET_ID not set")
-        self._spreadsheet = self._client.open_by_key(self.SPREADSHEET_ID)
+            creds_json = os.getenv("GOOGLE_CREDENTIALS_JSON", "")
+            if not creds_json:
+                raise Exception("GOOGLE_CREDENTIALS_JSON not set")
+
+            try:
+                info = json.loads(creds_json)
+            except Exception:
+                with open(creds_json, "r", encoding="utf-8") as fh:
+                    info = json.load(fh)
+
+            scopes = [
+                "https://www.googleapis.com/auth/spreadsheets",
+                "https://www.googleapis.com/auth/drive",
+            ]
+            credentials = Credentials.from_service_account_info(info, scopes=scopes)
+            self._client = gspread.authorize(credentials)
+            if not self.SPREADSHEET_ID:
+                raise Exception("GOOGLE_SHEETS_SPREADSHEET_ID not set")
+            self._spreadsheet = self._client.open_by_key(self.SPREADSHEET_ID)
         except Exception as e:
-            # Log and mark degraded; do not crash startup
-            print('⚠ Sheets init failed, entering degraded mode:', e)
+            print("⚠ Sheets init failed, entering degraded mode:", e)
             self._degraded = True
-            returndef _get_sheet(self, name: str):
+            self._client = None
+            self._spreadsheet = None
+
+    def _get_sheet(self, name: str):
         self._init_client()
+        if not self._spreadsheet:
+            return None
         try:
             return self._spreadsheet.worksheet(name)
         except Exception:
@@ -81,8 +95,14 @@ class SheetsService:
             sh = self._get_sheet(name)
             if sh:
                 return sh
+            if not self._spreadsheet:
+                raise Exception("Spreadsheet not available (degraded mode or init failed)")
             try:
-                sh = self._spreadsheet.add_worksheet(title=name, rows="1000", cols=str(max(20, len(headers))))
+                sh = self._spreadsheet.add_worksheet(
+                    title=name,
+                    rows="1000",
+                    cols=str(max(20, len(headers))),
+                )
                 sh.append_row(headers)
                 return sh
             except Exception:
@@ -106,9 +126,38 @@ class SheetsService:
                 sheet.update("1:1", [current])
 
     def smart_validate_sheets(self):
-        users_headers = ["user_id", "username", "full_name_telegram", "role", "city", "email", "phone", "referrer", "joined_via_expert_id", "created_at"]
-        experts_headers = ["user_id", "expert_full_name", "expert_field", "expert_experience", "expert_position", "expert_links", "expert_why", "created_at", "status", "group_link", "supporters_count"]
-        positions_headers = ["position_id", "title", "description", "expert_user_id", "assigned_at"]
+        users_headers = [
+            "user_id",
+            "username",
+            "full_name_telegram",
+            "role",
+            "city",
+            "email",
+            "phone",
+            "referrer",
+            "joined_via_expert_id",
+            "created_at",
+        ]
+        experts_headers = [
+            "user_id",
+            "expert_full_name",
+            "expert_field",
+            "expert_experience",
+            "expert_position",
+            "expert_links",
+            "expert_why",
+            "created_at",
+            "status",
+            "group_link",
+            "supporters_count",
+        ]
+        positions_headers = [
+            "position_id",
+            "title",
+            "description",
+            "expert_user_id",
+            "assigned_at",
+        ]
 
         users_sheet = self.create_sheet_if_missing(USERS_SHEET_NAME, users_headers)
         experts_sheet = self.create_sheet_if_missing(EXPERTS_SHEET_NAME, experts_headers)
@@ -120,21 +169,21 @@ class SheetsService:
 
     def get_users_sheet(self):
         sh = self._get_sheet(USERS_SHEET_NAME)
-        if not sh:
+        if not sh and not self._degraded:
             self.smart_validate_sheets()
             sh = self._get_sheet(USERS_SHEET_NAME)
         return sh
 
     def get_experts_sheet(self):
         sh = self._get_sheet(EXPERTS_SHEET_NAME)
-        if not sh:
+        if not sh and not self._degraded:
             self.smart_validate_sheets()
             sh = self._get_sheet(EXPERTS_SHEET_NAME)
         return sh
 
     def get_positions_sheet(self):
         sh = self._get_sheet(POSITIONS_SHEET_NAME)
-        if not sh:
+        if not sh and not self._degraded:
             self.smart_validate_sheets()
             sh = self._get_sheet(POSITIONS_SHEET_NAME)
         return sh
@@ -148,6 +197,8 @@ class SheetsService:
     @retry(Exception, tries=3, delay=0.5)
     def append_user(self, user_record: Dict[str, Any]):
         sheet = self.get_users_sheet()
+        if not sheet:
+            raise Exception("Users sheet not available (degraded mode or init failed)")
         headers = sheet.row_values(1)
         row = [user_record.get(h, "") for h in headers]
         with _lock:
@@ -156,6 +207,8 @@ class SheetsService:
     @retry(Exception, tries=3, delay=0.5)
     def append_expert(self, expert_record: Dict[str, Any]):
         sheet = self.get_experts_sheet()
+        if not sheet:
+            raise Exception("Experts sheet not available (degraded mode or init failed)")
         headers = sheet.row_values(1)
         row = [expert_record.get(h, "") for h in headers]
         with _lock:
@@ -164,6 +217,8 @@ class SheetsService:
     @retry(Exception, tries=3, delay=0.5)
     def update_expert_status(self, user_id: str, status: str):
         sheet = self.get_experts_sheet()
+        if not sheet:
+            return False
         records = sheet.get_all_records()
         for idx, r in enumerate(records, start=2):
             if str(r.get("user_id")) == str(user_id):
@@ -181,6 +236,8 @@ class SheetsService:
 
     def get_expert_by_id(self, user_id: str) -> Optional[Dict[str, Any]]:
         sheet = self.get_experts_sheet()
+        if not sheet:
+            return None
         rows = sheet.get_all_records()
         for r in rows:
             if str(r.get("user_id")) == str(user_id):
@@ -189,6 +246,8 @@ class SheetsService:
 
     def get_supporter_by_id(self, user_id: str) -> Optional[Dict[str, Any]]:
         sheet = self.get_users_sheet()
+        if not sheet:
+            return None
         rows = sheet.get_all_records()
         for r in rows:
             if str(r.get("user_id")) == str(user_id):
@@ -198,10 +257,14 @@ class SheetsService:
     @retry(Exception, tries=3, delay=0.5)
     def get_positions(self) -> List[Dict[str, Any]]:
         sheet = self.get_positions_sheet()
+        if not sheet:
+            return []
         return sheet.get_all_records()
 
     def get_position(self, position_id: str) -> Optional[Dict[str, Any]]:
         sheet = self.get_positions_sheet()
+        if not sheet:
+            return None
         rows = sheet.get_all_records()
         for r in rows:
             if str(r.get("position_id")) == str(position_id):
@@ -217,6 +280,8 @@ class SheetsService:
     @retry(Exception, tries=3, delay=0.5)
     def assign_position(self, position_id: str, user_id: str, timestamp: Optional[str] = None):
         sheet = self.get_positions_sheet()
+        if not sheet:
+            raise Exception("Positions sheet not available")
         rows = sheet.get_all_records()
         headers = sheet.row_values(1)
         for idx, r in enumerate(rows, start=2):
@@ -238,6 +303,8 @@ class SheetsService:
     @retry(Exception, tries=3, delay=0.5)
     def reset_position(self, position_id: str):
         sheet = self.get_positions_sheet()
+        if not sheet:
+            return False
         rows = sheet.get_all_records()
         headers = sheet.row_values(1)
         for idx, r in enumerate(rows, start=2):
@@ -253,6 +320,8 @@ class SheetsService:
     @retry(Exception, tries=3, delay=0.5)
     def reset_all_positions(self):
         sheet = self.get_positions_sheet()
+        if not sheet:
+            return False
         headers = sheet.row_values(1)
         rows = sheet.get_all_records()
         with _lock:
@@ -266,6 +335,8 @@ class SheetsService:
     @retry(Exception, tries=3, delay=0.5)
     def clear_user_duplicates(self) -> int:
         sheet = self.get_users_sheet()
+        if not sheet:
+            return 0
         rows = sheet.get_all_records()
         seen = set()
         deleted = 0
@@ -282,6 +353,8 @@ class SheetsService:
     @retry(Exception, tries=3, delay=0.5)
     def clear_expert_duplicates(self) -> int:
         sheet = self.get_experts_sheet()
+        if not sheet:
+            return 0
         rows = sheet.get_all_records()
         seen = set()
         deleted = 0
@@ -297,13 +370,21 @@ class SheetsService:
 
     def get_experts_leaderboard(self) -> List[Dict[str, Any]]:
         sheet = self.get_experts_sheet()
+        if not sheet:
+            return []
         rows = sheet.get_all_records()
+
         def safe_int(x):
             try:
                 return int(x)
             except Exception:
                 return 0
-        sorted_rows = sorted(rows, key=lambda r: safe_int(r.get("supporters_count", 0)), reverse=True)
+
+        sorted_rows = sorted(
+            rows,
+            key=lambda r: safe_int(r.get("supporters_count", 0)),
+            reverse=True,
+        )
         return sorted_rows
 
     def auto_fix_all_sheets(self):
@@ -311,6 +392,7 @@ class SheetsService:
 
     def validate_all_sheets(self):
         self.smart_validate_sheets()
+
 
 sheets_service = SheetsService()
 
@@ -340,4 +422,3 @@ __all__ = [
     "clear_expert_duplicates",
     "smart_validate_sheets",
 ]
-
