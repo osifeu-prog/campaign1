@@ -17,6 +17,9 @@ from utils.constants import (
     CALLBACK_ADMIN_BROADCAST,
     CALLBACK_ADMIN_EXPORT,
     CALLBACK_ADMIN_QUICK_NAV,
+    CALLBACK_START_SLIDE,
+    CALLBACK_START_SOCI,
+    CALLBACK_START_FINISH,
 )
 
 
@@ -112,3 +115,41 @@ def build_admin_sheets_keyboard() -> InlineKeyboardMarkup:
         ],
         [InlineKeyboardButton("↩️ חזרה לפאנל אדמין", callback_data=CALLBACK_MENU_ADMIN)],
     ])
+
+
+# ===============================
+# קרוסלת פתיחה /start
+# ===============================
+
+def build_start_carousel_keyboard(slide_index: int, total_slides: int) -> InlineKeyboardMarkup:
+    """
+    כפתורים לשקופיות פתיחה:
+    - המשך
+    - סוציוקרטיה
+    """
+    buttons = []
+
+    if slide_index < total_slides - 1:
+        buttons.append([
+            InlineKeyboardButton(
+                "המשך",
+                callback_data=f"{CALLBACK_START_SLIDE}:{slide_index + 1}"
+            ),
+            InlineKeyboardButton(
+                "סוציוקרטיה",
+                callback_data=CALLBACK_START_SOCI
+            ),
+        ])
+    else:
+        buttons.append([
+            InlineKeyboardButton(
+                "סוציוקרטיה",
+                callback_data=CALLBACK_START_SOCI
+            ),
+            InlineKeyboardButton(
+                "סיום והצטרפות",
+                callback_data=CALLBACK_START_FINISH
+            ),
+        ])
+
+    return InlineKeyboardMarkup(buttons)
