@@ -183,7 +183,6 @@ def validate_env():
             application.bot_data['sheets_degraded'] = True
             print('⚠ Sheets degraded mode detected at startup')
     except Exception:
-        # ignore if application.bot_data not ready yet
         pass
 
     # Try to initialize or validate the sheets client
@@ -259,7 +258,7 @@ async def startup_event():
     except Exception as e:
         print("⚠ Failed to register global error handler:", e, file=sys.stderr)
 
-    # ConversationHandler הראשי
+    # ConversationHandler הראשי (start + flows)
     try:
         conv_handler = bot_handlers.get_conversation_handler()
         if conv_handler:
@@ -291,11 +290,13 @@ async def startup_event():
             pattern=r"^supporters_page:"
         ))
 
+        # קרוסלה של /start – מטופלת ב־start_flow דרך bot_handlers.handle_start_callback_entry
         application.add_handler(CallbackQueryHandler(
             bot_handlers.handle_start_callback_entry,
             pattern=rf"^{CALLBACK_START_SLIDE}:|^{CALLBACK_START_SOCI}$|^{CALLBACK_START_FINISH}$"
         ))
 
+        # תפריט – route דרך menu_flow בתוך bot_handlers
         application.add_handler(CallbackQueryHandler(
             bot_handlers.handle_menu_callback
         ))
@@ -473,7 +474,6 @@ async def telegram_webhook(request: Request):
     try:
         raw = await request.body()
         text = raw.decode("utf-8") if raw else ""
-        # לוג בסיסי של ה‑payload (לא מדפיסים יותר מדי כדי לא לחרוג מגבולות)
         print("🔔 Incoming webhook payload (truncated 200 chars):")
         print(text[:200])
 
@@ -481,7 +481,6 @@ async def telegram_webhook(request: Request):
         update = Update.de_json(data, application.bot)
 
         if update:
-            # מעקב אחרי הודעה
             if update.message and update.message.from_user:
                 monitoring.track_message(
                     update.message.from_user.id,
@@ -562,5 +561,4 @@ try:
             application.add_handler(conv_handler)
             print("✔ ConversationHandler registered at import time")
 except Exception:
-    # If bot_handlers or conv_handler not available at import time, skip and rely on startup registration
     pass
