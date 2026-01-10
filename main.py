@@ -3,6 +3,8 @@
 # ===============================
 
 import os
+import sys
+import traceback
 
 from fastapi import FastAPI, Request
 from telegram import Update
@@ -38,20 +40,44 @@ from bot.admin_handlers import (
     broadcast_experts,
 )
 from services import sheets_service
-from utils.constants import CALLBACK_START_SLIDE, CALLBACK_START_SOCI, CALLBACK_START_FINISH
+from utils.constants import (
+    CALLBACK_START_SLIDE,
+    CALLBACK_START_SOCI,
+    CALLBACK_START_FINISH,
+)
 
+# ===============================
+# ENV
+# ===============================
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # לדוגמה: https://campaign1-production.up.railway.app/webhook
+
+if not TOKEN:
+    print("❌ ERROR: Missing TELEGRAM_BOT_TOKEN", file=sys.stderr)
+    raise SystemExit(1)
+
+if not WEBHOOK_URL:
+    print("❌ ERROR: Missing WEBHOOK_URL", file=sys.stderr)
+    raise SystemExit(1)
+
+# ===============================
+# FastAPI + Telegram Application
+# ===============================
 
 app = FastAPI()
 
 application = (
     ApplicationBuilder()
     .token(TOKEN)
+    .concurrent_updates(True)  # יציבות גבוהה יותר בעומס
     .build()
 )
 
+
+# ===============================
+# בדיקת ENV
+# ===============================
 
 def validate_env():
     if not TOKEN:
@@ -59,6 +85,10 @@ def validate_env():
     if not sheets_service.SPREADSHEET_ID:
         raise Exception("Missing GOOGLE_SHEETS_SPREADSHEET_ID")
 
+
+# ===============================
+# Startup – טעינת הבוט
+# ===============================
 
 @app.on_event("startup")
 async def startup_event():
@@ -70,14 +100,26 @@ async def startup_event():
     - הפעלת הבוט
     """
 
-    validate_env()
+    print("🚀 Starting bot initialization...")
 
-    print("🚀 Starting bot...")
+    try:
+        validate_env()
+    except Exception as e:
+        print(f"❌ ENV validation failed: {e}", file=sys.stderr)
+        raise
+
     print("🔍 Running Smart Validation on Google Sheets...")
 
-    sheets_service.smart_validate_sheets()
+    try:
+        sheets_service.smart_validate_sheets()
+        print("✔ Sheets validated successfully")
+    except Exception as e:
+        print("❌ CRITICAL: Smart Validation failed!", file=sys.stderr)
+        print(e)
+        traceback.print_exc()
+        # לא מפילים את הבוט – מאפשרים לאדמין לתקן דרך הפאנל
+        print("⚠️ Continuing startup WITHOUT sheet validation.")
 
-    print("✔ Sheets validated successfully")
     print("🔧 Initializing bot handlers...")
 
     # ConversationHandler הראשי
@@ -86,19 +128,19 @@ async def startup_event():
 
     # --- סדר נכון של CallbackQueryHandlers ---
 
-    # קודם callbacks של אישור/דחיית מומחים
+    # 1) callbacks של אישור/דחיית מומחים
     application.add_handler(CallbackQueryHandler(
         expert_admin_callback,
         pattern=r"^expert_(approve|reject):"
     ))
 
-    # callbacks של קרוסלת /start
+    # 2) callbacks של קרוסלת /start
     application.add_handler(CallbackQueryHandler(
         bot_handlers.handle_start_callback,
         pattern=rf"^{CALLBACK_START_SLIDE}:|^{CALLBACK_START_SOCI}$|^{CALLBACK_START_FINISH}$"
     ))
 
-    # אחר כך כל שאר ה־callbacks של התפריטים
+    # 3) כל שאר ה־callbacks של התפריטים
     application.add_handler(CallbackQueryHandler(
         bot_handlers.handle_menu_callback
     ))
@@ -147,12 +189,21 @@ async def startup_event():
     print("🤖 Bot initialized and running!")
 
 
+# ===============================
+# Webhook endpoint
+# ===============================
+
 @app.post("/webhook")
 async def telegram_webhook(request: Request):
     """
     נקודת קצה לקבלת עדכונים מהטלגרם
     """
-    data = await request.json()
-    update = Update.de_json(data, application.bot)
-    await application.process_update(update)
+    try:
+        data = await request.json()
+        update = Update.de_json(data, application.bot)
+        await application.process_update(update)
+    except Exception as e:
+        print("❌ Error processing update:", e, file=sys.stderr)
+        traceback.print_exc()
+
     return {"ok": True}
