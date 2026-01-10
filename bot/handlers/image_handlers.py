@@ -46,7 +46,6 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
         out_paths = resize_image(in_path, tmp_dir, sizes)
 
         # send as album
-        media_group = []
         for p in out_paths:
             await context.bot.send_photo(chat_id=update.effective_chat.id, photo=InputFile(p))
         await log(context, "Processed photo and returned sizes", user=user, extra={"sizes": [f"{w}x{h}" for w,h in sizes]})
