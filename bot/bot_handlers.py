@@ -1,43 +1,22 @@
 # ===============================
-# Router ראשי: start, menu, callbacks, conv handler
+# bot_handlers – Router ראשי
 # ===============================
 
+import os
+import random
 from datetime import datetime
-from typing import Optional
+from typing import List, Tuple
 
-from telegram import Update
+from telegram import Update, InputMediaPhoto
 from telegram.ext import (
     ContextTypes,
     ConversationHandler,
-    CallbackQueryHandler,
     CommandHandler,
     MessageHandler,
+    CallbackQueryHandler,
     filters,
 )
 
-from utils.constants import (
-    ADMIN_IDS,
-    LOG_GROUP_ID,
-    ROLE_SUPPORTER,
-    ROLE_EXPERT,
-    CALLBACK_MENU_MAIN,
-    CALLBACK_MENU_SUPPORT,
-    CALLBACK_MENU_EXPERT,
-    CALLBACK_MENU_ADMIN,
-    CALLBACK_APPLY_EXPERT,
-    CALLBACK_APPLY_SUPPORTER,
-    CALLBACK_ADMIN_PENDING_EXPERTS,
-    CALLBACK_ADMIN_GROUPS,
-    CALLBACK_MENU_POSITIONS,
-    CALLBACK_ADMIN_SHEETS,
-    CALLBACK_ADMIN_SHEETS_INFO,
-    CALLBACK_ADMIN_SHEETS_FIX,
-    CALLBACK_ADMIN_SHEETS_VALIDATE,
-    CALLBACK_ADMIN_SHEETS_CLEAR_DUP,
-    CALLBACK_ADMIN_BROADCAST,
-    CALLBACK_ADMIN_EXPORT,
-    CALLBACK_ADMIN_QUICK_NAV,
-)
 from bot.states import (
     CHOOSING_ROLE,
     SUPPORTER_NAME,
@@ -52,518 +31,404 @@ from bot.states import (
     EXPERT_LINKS,
     EXPERT_WHY,
 )
+from bot import supporter_handlers, expert_handlers
 from bot.keyboards import (
-    build_main_menu_for_user,
     build_start_keyboard,
-    build_supporter_profile_keyboard,
-    build_expert_panel_keyboard,
-    build_admin_panel_keyboard,
+    build_main_menu_for_user,
+    build_start_carousel_keyboard,
 )
-from bot.supporter_handlers import (
-    supporter_name,
-    supporter_city,
-    supporter_email,
-    supporter_phone,
-    supporter_feedback,
-)
-from bot.expert_handlers import (
-    expert_name,
-    expert_field,
-    expert_experience,
-    expert_position,
-    expert_links,
-    expert_why,
-    build_expert_referral_link,
-)
-from bot.admin_handlers import expert_admin_callback
 from services import sheets_service
 from services.logger_service import log
+from utils.constants import (
+    ADMIN_IDS,
+    ROLE_SUPPORTER,
+    ROLE_EXPERT,
+    START_IMAGES_DIR,
+    CALLBACK_MENU_MAIN,
+    CALLBACK_MENU_SUPPORT,
+    CALLBACK_MENU_EXPERT,
+    CALLBACK_MENU_ADMIN,
+    CALLBACK_APPLY_SUPPORTER,
+    CALLBACK_APPLY_EXPERT,
+    CALLBACK_MENU_POSITIONS,
+    CALLBACK_START_SLIDE,
+    CALLBACK_START_SOCI,
+    CALLBACK_START_SOCI_BACK,
+    CALLBACK_START_FINISH,
+)
 
 
-# ---------- פונקציות עזר בסיסיות ----------
+# ===============================
+# עזר: בדיקת אדמין
+# ===============================
 
 def is_admin(user_id: int) -> bool:
     return str(user_id) in ADMIN_IDS
 
 
-def parse_start_param(text: str) -> str:
-    parts = text.split(" ", maxsplit=1)
-    if len(parts) == 2:
-        return parts[1].strip()
-    return ""
+# ===============================
+# עזר: טעינת תמונות לתיקיית הפתיחה
+# ===============================
+
+def _get_start_images() -> List[str]:
+    if not os.path.isdir(START_IMAGES_DIR):
+        return []
+    files = [
+        os.path.join(START_IMAGES_DIR, f)
+        for f in os.listdir(START_IMAGES_DIR)
+        if f.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))
+    ]
+    return files
 
 
-def extract_joined_via_expert(start_param: str) -> str:
-    if start_param.startswith("expert_"):
-        return start_param.replace("expert_", "", 1)
-    return ""
+def _get_random_start_image() -> str | None:
+    imgs = _get_start_images()
+    if not imgs:
+        return None
+    return random.choice(imgs)
 
 
-def build_personal_link(bot_username: str, user_id: int) -> str:
-    return f"https://t.me/{bot_username}?start={user_id}"
+# ===============================
+# טקסטים לשקופיות הפתיחה
+# ===============================
+
+def get_intro_slides() -> List[str]:
+    slides: List[str] = []
+
+    # הודעה 1 - פתיחה וחזון
+    slides.append(
+        "הגיע הזמן לשינוי אמיתי\n"
+        "ישראל שלנו זקוקה למהפכה - לא של כעס, אלא של אהבה ומקצועיות.\n"
+        "אנחנו, תנועת אחדות, מציעים חלופה אמיתית:\n\n"
+        "• 120 מומחים בתחומם במקום 120 פוליטיקאים\n"
+        "• מבנה סוציוקרטי שמעמיד את האזרח במרכז\n"
+        "• פתרונות מקצועיים במקום משחקי כוח"
+    )
+
+    # הודעה 2 - מי אנחנו מחפשים
+    slides.append(
+        "💡 מי יכול להצטרף לתנועה?\n"
+        "אנחנו מגייסים שלוש קבוצות:\n"
+        "1️⃣ מומחים/מתמודדים – אנשי מקצוע שרוצים להוביל שינוי מבפנים.\n"
+        "2️⃣ פעילים – אזרחים שרוצים לקחת חלק פעיל בשינוי.\n"
+        "3️⃣ תומכים ומצביעים – כל מי שמאמין בדרך החדשה.\n\n"
+        "העיקרון שלנו:\n"
+        "לא הון, לא שלטון, לא עולם תחתון – אלא תרומה אמיתית לקהילה דרך מקצועיות ומומחיות."
+    )
+
+    # הודעה 3 - החזון המעשי
+    slides.append(
+        "🎯 איך זה יעבוד בפועל?\n"
+        "במקום פלוגה מפולגת – תנועה מאוחדת.\n"
+        "במקום משחקים פוליטיים – צוות ניהול מקצועי.\n"
+        "במקום הבטחות ריקות – פתרונות ממשיים.\n\n"
+        "אנחנו בונים:\n"
+        "✅ שקיפות מלאה\n"
+        "✅ מבנה סוציוקרטי שמאפשר השפעה אמיתית לכל אזרח\n"
+        "✅ 120 אנשים שעומדים במילה שלהם ופועלים למען המדינה, לא למען עצמם."
+    )
+
+    # הודעה 4 - קריאה לפעולה
+    slides.append(
+        "📝 הצטרפו עכשיו לתנועת אחדות\n\n"
+        "תהליך ההרשמה פשוט ושקוף:\n"
+        "1️⃣ מלאו את פרטיכם בטופס ההרשמה\n"
+        "2️⃣ כל הרשמה מתועדת אוטומטית ב-Google Sheets\n"
+        "3️⃣ המידע זמין לכל מי שמבקש לראותו - שקיפות מלאה\n"
+        "4️⃣ נציג מהתנועה יצור איתכם קשר להמשך\n\n"
+        "זה הזמן לעשות את ההבדל.\n"
+        "ישראל זקוקה למומחים שלה, לא לפוליטיקאים שלה."
+    )
+
+    # הודעה 5 - סיום ועידוד
+    slides.append(
+        "🌟 יחד ניצור את השינוי\n\n"
+        "כל תנועה גדולה מתחילה בצעד אחד.\n"
+        "כל מהפכה מתחילה באדם אחד שאומר 'די'.\n\n"
+        "הצטרפו לתנועת אחדות והיו חלק מהדור שישנה את פני המדינה.\n"
+        "לא דרך אלימות. לא דרך שנאה.\n"
+        "אלא דרך מקצועיות, מומחיות, ואהבת ישראל.\n\n"
+        "120 מקומות. מיליוני אזרחים. חזון אחד.\n"
+        "💪 ביחד נצליח"
+    )
+
+    return slides
 
 
-async def send_main_menu(update: Optional[Update], context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id if update and update.effective_chat else None
-    if chat_id is None:
-        return
+def get_sociocracy_text() -> str:
+    return (
+        "סוציוקרטיה (Sociocracy) היא שיטת ממשל וקבלת החלטות המבוססת על שוויון, שקיפות והשתתפות של כל חברי הארגון או הקהילה.\n"
+        "השם מורכב מ-socius (לטינית: 'חברים') ו-kratein (יוונית: 'ניהול') – כלומר 'ניהול החברים' או 'אחזקה של שווים'.\n\n"
+        "יתרונות הסוציוקרטיה:\n\n"
+        "1. קבלת החלטות בהסכמה (Consent)\n"
+        "• החלטות מתקבלות לא ברוב, אלא כשאין התנגדות מבוססת.\n"
+        "• כל אדם יכול להעלות התנגדות רק אם ההחלטה תפגע ביכולתו לתרום למטרה המשותפת.\n"
+        "• זה לא פה אחד – אלא: 'אין לי סיבה מספיק חשובה להתנגד'.\n\n"
+        "2. ארגון במעגלים (Circles)\n"
+        "• הארגון מחולק למעגלים לפי תפקידים ותחומי אחריות.\n"
+        "• כל מעגל אוטונומי בתחום שלו.\n"
+        "• המעגלים מחוברים זה לזה בהיררכיה שטוחה יותר.\n\n"
+        "3. קישור כפול (Double Linking)\n"
+        "• כל מעגל מחובר למעגל שמעליו דרך שני נציגים:\n"
+        "  – מנהיג שנבחר מלמעלה בבחירות שקופות (מנומקות).\n"
+        "  – נציג שנבחר מלמטה בבחירות שקופות (מנומקות).\n"
+        "• זה מבטיח זרימת מידע דו-כיוונית ומאזן כוחות.\n\n"
+        "4. בחירות פתוחות\n"
+        "• תפקידים מתמלאים בתהליך בחירות שקוף.\n"
+        "• כל אחד מסביר למה הוא ממליץ על מועמד מסוים.\n"
+        "• הבחירה היא בהסכמה, לא בהצבעה סודית.\n\n"
+        "4.1 איך זה עובד בפועל? (דוגמה: תקציב)\n"
+        "• מציגים את ההצעה לכולם.\n"
+        "• שואלים שאלות הבהרה.\n"
+        "• כל אחד מביע את דעתו.\n"
+        "• משכללים את ההצעה.\n"
+        "• שואלים: 'האם יש למישהו התנגדות מבוססת?'\n"
+        "• אם יש – עובדים יחד לשכלל את ההצעה.\n"
+        "• אם אין – ההחלטה מתקבלת.\n\n"
+        "4.3 היתרונות\n"
+        "✅ החלטות איכותיות יותר – כי כל הקולות נשמעים.\n"
+        "✅ מחויבות גבוהה יותר – כי כולם חלק מההחלטה.\n"
+        "✅ פחות קונפליקטים – אין 'מנצחים ומפסידים'.\n"
+        "✅ שקיפות מלאה.\n"
+        "✅ גמישות – קל לשנות החלטות כשהן לא עובדות.\n"
+        "✅ העצמה – כל אדם יכול להשפיע באמת.\n\n"
+        "4.4 האתגרים\n"
+        "⚠️ לוקח יותר זמן בהתחלה.\n"
+        "⚠️ דורש חינוך והכשרה.\n"
+        "⚠️ לא תמיד מתאים לכל תרבות.\n"
+        "⚠️ בקנה מידה גדול – צריך מבנה מחושב היטב.\n\n"
+        "5. סוציוקרטיה במדינה – איך זה יכול לעבוד?\n"
+        "• במקום 120 חברי כנסת – מעגלים תחומיים (בריאות, חינוך, ביטחון, כלכלה וכו').\n"
+        "• מומחים בכל מעגל שמקבלים החלטות בתחום שלהם.\n"
+        "• קישור בין המעגלים דרך נציגים דו-כיווניים.\n"
+        "• החלטות לאומיות גדולות מתקבלות בהסכמה של כל המעגלים.\n"
+        "• שקיפות מלאה – כל אזרח יכול לראות את התהליכים.\n\n"
+        "סוציוקרטיה היא ניסיון ליצור 'דמוקרטיה משופרת' – שבה כל אדם באמת משפיע, והחלטות מתקבלות על סמך חוכמה קולקטיבית ולא משחקי כוח פוליטיים."
+    )
 
-    user_id = update.effective_user.id if update.effective_user else 0
-    text = "תפריט ראשי:\n\nבחר מה ברצונך לעשות."
-    reply_markup = build_main_menu_for_user(user_id, is_admin(user_id))
 
-    if update.callback_query:
-        await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
-    else:
-        await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
-
-
-# ---------- /start ----------
+# ===============================
+# /start – פתיחה + קרוסלה + סוציוקרטיה
+# ===============================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message and update.message.text.startswith("/start"):
-        start_param = parse_start_param(update.message.text)
-        context.user_data["start_param"] = start_param
+    user = update.effective_user
+    chat = update.effective_chat
 
-        if start_param and not start_param.startswith("expert_"):
-            context.user_data["referrer"] = start_param
+    # הכנת user_data בסיסי
+    context.user_data["user_id"] = user.id
+    context.user_data["username"] = user.username or ""
+    context.user_data["full_name_telegram"] = user.full_name
+    context.user_data.setdefault("created_at", datetime.utcnow().isoformat())
 
-        joined = extract_joined_via_expert(start_param)
-        if joined:
-            context.user_data["joined_via_expert_id"] = joined
+    await log(context, "/start called", user=user)
 
-    await log(context, "Start command", user=update.effective_user, extra={
-        "start_param": context.user_data.get("start_param")
-    })
+    slides = get_intro_slides()
+    first_text = slides[0]
+    image_path = _get_random_start_image()
 
-    context.user_data["user_id"] = update.effective_user.id
-    context.user_data["username"] = update.effective_user.username
-    context.user_data["full_name_telegram"] = update.effective_user.full_name
-    context.user_data["created_at"] = datetime.utcnow().isoformat()
+    if image_path:
+        with open(image_path, "rb") as f:
+            await context.bot.send_photo(
+                chat_id=chat.id,
+                photo=f,
+                caption=first_text,
+                reply_markup=build_start_carousel_keyboard(slide_index=0, total_slides=len(slides)),
+            )
+    else:
+        await update.message.reply_text(
+            first_text,
+            reply_markup=build_start_carousel_keyboard(slide_index=0, total_slides=len(slides)),
+        )
 
-    intro_text = (
+
+async def handle_start_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+
+    slides = get_intro_slides()
+    total = len(slides)
+
+    # start_slide:<index>
+    if data.startswith(f"{CALLBACK_START_SLIDE}:"):
+        _, idx_str = data.split(":", 1)
+        idx = int(idx_str)
+        idx = max(0, min(idx, total - 1))
+
+        image_path = _get_random_start_image()
+        text = slides[idx]
+
+        if query.message.photo:
+            # עריכת הודעה קיימת (קרוסלה)
+            if image_path:
+                with open(image_path, "rb") as f:
+                    await query.message.edit_media(
+                        media=InputMediaPhoto(media=f, caption=text),
+                        reply_markup=build_start_carousel_keyboard(idx, total),
+                    )
+            else:
+                await query.message.edit_caption(
+                    caption=text,
+                    reply_markup=build_start_carousel_keyboard(idx, total),
+                )
+        else:
+            if image_path:
+                with open(image_path, "rb") as f:
+                    await query.message.edit_media(
+                        media=InputMediaPhoto(media=f, caption=text),
+                        reply_markup=build_start_carousel_keyboard(idx, total),
+                    )
+            else:
+                await query.message.edit_text(
+                    text=text,
+                    reply_markup=build_start_carousel_keyboard(idx, total),
+                )
+
+    elif data == CALLBACK_START_SOCI:
+        text = get_sociocracy_text()
+        keyboard = build_start_carousel_keyboard(slide_index=0, total_slides=total)
+        # נשלח כהודעה חדשה, לא נדרוס את הקרוסלה
+        await query.message.reply_text(text)
+        await query.message.reply_text(
+            "אפשר לחזור לשקופיות על ידי לחיצה על 'המשך' או 'סיום והצטרפות' בקרוסלה.",
+            reply_markup=keyboard,
+        )
+
+    elif data == CALLBACK_START_FINISH:
+        # כאן נציג את ההודעה הסופית + תפריט / הרשמה
+        await send_final_start_message(update, context)
+
+
+async def send_final_start_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+
+    text = (
         "ברוך הבא לתנועת אחדות.\n\n"
         "אני הבוט שדרכו מצטרפים, נרשמים כתומכים ומגישים מועמדות כמומחים.\n\n"
         "איך תרצה להצטרף?"
     )
 
-    if update.message:
-        await update.message.reply_text(intro_text, reply_markup=build_start_keyboard())
+    keyboard = build_start_keyboard()
+
+    if update.callback_query:
+        await update.callback_query.message.reply_text(text, reply_markup=keyboard)
     else:
-        await update.callback_query.message.reply_text(intro_text, reply_markup=build_start_keyboard())
+        await update.message.reply_text(text, reply_markup=keyboard)
 
-    return CHOOSING_ROLE
+    await log(context, "Final start message shown", user=user)
 
 
-# ---------- פקודות בסיס ----------
+# ===============================
+# פקודות כלליות
+# ===============================
 
 async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await log(context, "Menu command", user=update.effective_user)
-    await send_main_menu(update, context)
+    user = update.effective_user
+    is_admin_flag = is_admin(user.id)
+
+    keyboard = build_main_menu_for_user(user.id, is_admin_flag)
+    await update.message.reply_text("📋 תפריט ראשי", reply_markup=keyboard)
 
 
 async def all_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await log(context, "All commands requested", user=update.effective_user)
     text = (
-        "פקודות זמינות:\n\n"
-        "כללי:\n"
-        "/start – התחלת תהליך רישום\n"
-        "/menu – תפריט ראשי\n"
-        "/help – עזרה\n"
-        "/myid – הצגת ה-ID שלך\n"
-        "/groupid – הצגת ה-ID של הקבוצה\n\n"
-        "מקומות:\n"
-        "/positions – רשימת מקומות\n"
-        "/position <מספר> – פרטי מקום\n"
-        "/assign <מקום> <user_id> – שיוך מקום (אדמין)\n"
-        "/reset_position <מקום> – איפוס מקום (אדמין)\n"
-        "/reset_all_positions – איפוס כל המקומות (אדמין)\n\n"
-        "שיטס (אדמין):\n"
-        "/sheet_info – מידע על הגיליונות\n"
-        "/validate_sheets – בדיקת תקינות\n"
-        "/fix_sheets – תיקון כותרות\n"
-        "/clear_user_duplicates – ניקוי כפילויות מתומכים\n"
-        "/clear_expert_duplicates – ניקוי כפילויות ממומחים\n\n"
-        "חיפוש / רשימות (אדמין):\n"
-        "/find_user <user_id> – חיפוש משתמש\n"
-        "/find_expert <user_id> – חיפוש מומחה\n"
-        "/find_position <id> – חיפוש מקום\n"
-        "/list_approved_experts – מומחים מאושרים\n"
-        "/list_rejected_experts – מומחים שנדחו\n"
-        "/list_supporters – רשימת תומכים\n\n"
-        "שידור (אדמין):\n"
-        "/broadcast_supporters <טקסט> – שידור לתומכים\n"
-        "/broadcast_experts <טקסט> – שידור למומחים\n\n"
-        "ניהול:\n"
-        "/set_expert_group <user_id> <link> – שמירת קישור קבוצה למומחה\n"
-        "/admin_menu – פאנל אדמין\n"
+        "/start – התחלה מחדש\n"
+        "/menu – פתיחת תפריט ראשי\n"
+        "/help – רשימת פקודות\n"
+        "/myid – הצגת ה־user_id שלך\n"
+        "/groupid – הצגת group id (בקבוצה)\n"
     )
     await update.message.reply_text(text)
 
 
-# ---------- בחירת תפקיד ב־callback ----------
-
-async def choose_role(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    role = query.data
-    context.user_data["role"] = role
-    context.user_data["user_id"] = query.from_user.id
-    context.user_data["username"] = query.from_user.username
-    context.user_data["full_name_telegram"] = query.from_user.full_name
-    context.user_data["created_at"] = datetime.utcnow().isoformat()
-
-    await log(context, "Role chosen", user=query.from_user, extra={
-        "role": role,
-        "created_at": context.user_data["created_at"],
-    })
-
-    if role == ROLE_SUPPORTER:
-        await query.edit_message_text("מה שמך המלא?")
-        return SUPPORTER_NAME
-
-    if role == ROLE_EXPERT:
-        await query.edit_message_text("מה שמך המלא?")
-        return EXPERT_NAME
-
-
-# ---------- callbacks של תפריטים ----------
-
-async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    from bot import admin_handlers  # למניעת import מעגלי
-    query = update.callback_query
-    await query.answer()
-    user = query.from_user
-    bot_username = context.bot.username
-
-    # תפריט ראשי
-    if query.data == CALLBACK_MENU_MAIN:
-        await log(context, "Open main menu (callback)", user=user)
-        await send_main_menu(update, context)
-        return
-
-    # תפריט תומך
-    if query.data == CALLBACK_MENU_SUPPORT:
-        await log(context, "Open supporter menu", user=user)
-
-        supporter = sheets_service.get_supporter_by_id(str(user.id))
-        personal_link = build_personal_link(bot_username, user.id)
-
-        if supporter:
-            text = (
-                "פרופיל תומך:\n\n"
-                f"שם: {supporter.get('full_name_telegram', user.full_name)}\n"
-                f"עיר: {supporter.get('city', 'לא צויין')}\n"
-                f"אימייל: {supporter.get('email', 'לא צויין')}\n\n"
-                "הקישור האישי שלך לשיתוף:\n"
-                f"{personal_link}\n\n"
-                "מה תרצה לעשות עכשיו?"
-            )
-        else:
-            text = (
-                "עדיין לא נרשמת כתומך.\n\n"
-                "כדי להירשם כתומך:\n"
-                "שלח /start ובחר 'תומך'.\n\n"
-                "אחרי ההרשמה תקבל קישור אישי לשיתוף."
-            )
-
-        keyboard = build_supporter_profile_keyboard(personal_link)
-        await query.edit_message_text(text, reply_markup=keyboard)
-        return
-
-    # תפריט מומחה
-    if query.data == CALLBACK_MENU_EXPERT:
-        await log(context, "Open expert menu", user=user)
-
-        status = sheets_service.get_expert_status(str(user.id))
-        position = sheets_service.get_expert_position(str(user.id))
-        group_link = sheets_service.get_expert_group_link(str(user.id))
-        referral_link = build_expert_referral_link(bot_username, user.id)
-
-        if status is None:
-            text = (
-                "עדיין לא הגשת מועמדות כמומחה.\n\n"
-                "כדי להגיש מועמדות:\n"
-                "שלח /start ובחר 'מומחה'."
-            )
-            from telegram import InlineKeyboardMarkup, InlineKeyboardButton
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🧠 הגשת מועמדות כמומחה", callback_data=CALLBACK_APPLY_EXPERT)],
-                [InlineKeyboardButton("📋 תפריט ראשי", callback_data=CALLBACK_MENU_MAIN)],
-            ])
-            await query.edit_message_text(text, reply_markup=keyboard)
-            return
-
-        status_text_map = {
-            "pending": "ממתין לאישור",
-            "approved": "מאושר",
-            "rejected": "נדחה",
-        }
-        status_text = status_text_map.get(status, status or "לא ידוע")
-        pos_text = position or "לא נבחר"
-
-        text = (
-            "פאנל מומחה:\n\n"
-            f"סטטוס המועמדות שלך: {status_text}\n"
-            f"מקום שבחרת: {pos_text}\n\n"
-        )
-
-        if status == "approved":
-            text += (
-                "המועמדות שלך אושרה.\n\n"
-                "קישור הבוט האישי שלך לשיתוף (מומחה):\n"
-                f"{referral_link}\n\n"
-            )
-            if group_link:
-                text += f"קישור לקבוצה שלך:\n{group_link}\n\n"
-            else:
-                text += (
-                    "עדיין לא הוגדר קישור לקבוצה שלך.\n"
-                    "האדמין יכול להגדיר זאת עם:\n"
-                    "/set_expert_group <user_id> <link>\n\n"
-                )
-        elif status == "pending":
-            text += "המועמדות שלך ממתינה לאישור אדמין.\n\n"
-        elif status == "rejected":
-            text += (
-                "המועמדות שלך נדחתה.\n"
-                "תוכל להגיש מועמדות מחדש בכל עת.\n\n"
-            )
-
-        text += "מה תרצה לעשות עכשיו?"
-
-        keyboard = build_expert_panel_keyboard(status, referral_link)
-        await query.edit_message_text(text, reply_markup=keyboard)
-        return
-
-    # תפריט אדמין
-    if query.data == CALLBACK_MENU_ADMIN:
-        if not is_admin(user.id):
-            await query.edit_message_text("אין לך הרשאה לצפות בפאנל האדמין.")
-            return
-
-        await log(context, "Open admin panel", user=user)
-        text = (
-            "🛠️ פאנל אדמין:\n\n"
-            "באפשרותך להשתמש בפקודות או בכפתורים שלמטה.\n"
-        )
-        await query.edit_message_text(text, reply_markup=build_admin_panel_keyboard())
-        return
-
-    # מומחים ממתינים
-    if query.data == CALLBACK_ADMIN_PENDING_EXPERTS:
-        if not is_admin(user.id):
-            await query.edit_message_text("אין לך הרשאה.")
-            return
-
-        await log(context, "Admin view pending experts", user=user)
-        experts = sheets_service.get_experts_pending()
-
-        from telegram import InlineKeyboardMarkup, InlineKeyboardButton
-
-        if not experts:
-            await query.edit_message_text(
-                "אין מומחים ממתינים כרגע.",
-                reply_markup=build_main_menu_for_user(user.id, is_admin(user.id))
-            )
-            return
-
-        text = "מומחים ממתינים:\n\n"
-        keyboard_rows = []
-
-        for expert in experts:
-            text += (
-                f"{expert['expert_full_name']} – מקום {expert['expert_position']}, "
-                f"תחום: {expert['expert_field']}\n"
-            )
-            keyboard_rows.append([
-                InlineKeyboardButton(
-                    f"אשר {expert['expert_full_name']}",
-                    callback_data=f"expert_approve:{expert['user_id']}",
-                ),
-                InlineKeyboardButton(
-                    "דחה",
-                    callback_data=f"expert_reject:{expert['user_id']}",
-                ),
-            ])
-
-        keyboard_rows.append(
-            [InlineKeyboardButton("↩️ חזרה לפאנל אדמין", callback_data=CALLBACK_MENU_ADMIN)]
-        )
-
-        await query.edit_message_text(
-            text,
-            reply_markup=InlineKeyboardMarkup(keyboard_rows),
-        )
-        return
-
-    # ניהול קבוצות
-    if query.data == CALLBACK_ADMIN_GROUPS:
-        from utils.constants import (
-            ALL_MEMBERS_GROUP_ID,
-            ACTIVISTS_GROUP_ID,
-            EXPERTS_GROUP_ID,
-            SUPPORT_GROUP_ID,
-        )
-        from telegram import InlineKeyboardMarkup, InlineKeyboardButton
-
-        if not is_admin(user.id):
-            await query.edit_message_text("אין לך הרשאה.")
-            return
-
-        await log(context, "Admin view groups info", user=user)
-
-        text = (
-            "ניהול קבוצות:\n\n"
-            f"ALL_MEMBERS_GROUP_ID: {ALL_MEMBERS_GROUP_ID or 'לא מוגדר'}\n"
-            f"ACTIVISTS_GROUP_ID: {ACTIVISTS_GROUP_ID or 'לא מוגדר'}\n"
-            f"EXPERTS_GROUP_ID: {EXPERTS_GROUP_ID or 'לא מוגדר'}\n"
-            f"SUPPORT_GROUP_ID: {SUPPORT_GROUP_ID or 'לא מוגדר'}\n\n"
-            "ניתן לעדכן את הערכים דרך משתני סביבה (ENV) בפריסה."
-        )
-        await query.edit_message_text(
-            text,
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("↩️ חזרה לפאנל אדמין", callback_data=CALLBACK_MENU_ADMIN)],
-                [InlineKeyboardButton("↩️ תפריט ראשי", callback_data=CALLBACK_MENU_MAIN)],
-            ]),
-        )
-        return
-
-    # apply מחדש / התחלת תהליך מומחה מחדש
-    if query.data == CALLBACK_APPLY_EXPERT:
-        await log(context, "User chose apply expert from menu", user=user)
-        await query.edit_message_text("כדי להגיש מועמדות כמומחה:\nשלח /start ובחר 'מומחה'.")
-        return
-
-    if query.data == CALLBACK_APPLY_SUPPORTER:
-        await log(context, "User chose re-apply supporter", user=user)
-        await query.edit_message_text("מתחילים מחדש את תהליך ההרשמה.\nשלח /start ובחר 'תומך'.")
-        return
-
-    # רשימת מקומות מתוך תפריט
-    if query.data == CALLBACK_MENU_POSITIONS:
-        positions = sheets_service.get_positions()
-        await log(context, "View positions from menu", user=user, extra={
-            "positions_count": len(positions)
-        })
-        text = "רשימת המקומות:\n\n"
-        for pos in positions:
-            status = "תפוס" if pos["expert_user_id"] else "פנוי"
-            text += f"{pos['position_id']}. {pos['title']} - {status}\n"
-        await query.edit_message_text(text, reply_markup=build_main_menu_for_user(user.id, is_admin(user.id)))
-        return
-
-    # תתי־תפריטים של אדמין (ניהול גיליונות, שידור, יצוא, ניווט מהיר)
-    if query.data in {
-        CALLBACK_ADMIN_SHEETS,
-        CALLBACK_ADMIN_SHEETS_INFO,
-        CALLBACK_ADMIN_SHEETS_FIX,
-        CALLBACK_ADMIN_SHEETS_VALIDATE,
-        CALLBACK_ADMIN_SHEETS_CLEAR_DUP,
-        CALLBACK_ADMIN_BROADCAST,
-        CALLBACK_ADMIN_EXPORT,
-        CALLBACK_ADMIN_QUICK_NAV,
-    }:
-        await admin_handlers.handle_admin_callback(query, context)
-        return
-
-
-# ---------- פקודות עזר ----------
-
 async def my_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await log(context, "my_id requested", user=update.effective_user)
-    await update.message.reply_text(f"Your ID: {update.effective_user.id}")
+    user_id = update.effective_user.id
+    await update.message.reply_text(f"user_id שלך: {user_id}")
 
 
 async def group_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await log(context, "group_id requested", user=update.effective_user, extra={
-        "chat_id": update.effective_chat.id
-    })
-    await update.message.reply_text(f"Group ID: {update.effective_chat.id}")
-
-
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await log(context, "Conversation cancelled", user=update.effective_user)
-    await update.message.reply_text(
-        "ההרשמה בוטלה.\n"
-        "תוכל להתחיל מחדש בכל עת עם /start או לפתוח את התפריט עם /menu."
-    )
-    return ConversationHandler.END
+    chat = update.effective_chat
+    await update.message.reply_text(f"group/chat id: {chat.id}")
 
 
 async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await log(context, "Unknown command", user=update.effective_user, extra={
-        "text": update.message.text
-    })
-    await update.message.reply_text(
-        "לא זיהיתי את הפקודה הזו.\n"
-        "נסה /menu כדי לראות את כל האפשרויות."
-    )
+    await update.message.reply_text("הפקודה הזו לא מוכרת. נסה /help.")
 
 
-# ---------- ConversationHandler ----------
+# ===============================
+# תפריטי callback (menu)
+# ===============================
+
+async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    user = query.from_user
+
+    if data == "expert":
+        # התחלת רישום מומחה
+        await query.message.reply_text("מעולה, נתחיל בתהליך הגשת מועמדות כמומחה. מה שמך המלא?")
+        return EXPERT_NAME
+
+    if data == "supporter":
+        # התחלת רישום תומך
+        await query.message.reply_text("נשמח להכיר! איך קוראים לך?")
+        return SUPPORTER_NAME
+
+    if data == CALLBACK_MENU_MAIN:
+        keyboard = build_main_menu_for_user(user.id, is_admin(user.id))
+        await query.message.reply_text("📋 תפריט ראשי", reply_markup=keyboard)
+        return ConversationHandler.END
+
+    # תפריטי תומך / מומחה / אדמין – כאן תוכל להרחיב לפי מה שכבר קיים אצלך
+    if data == CALLBACK_MENU_SUPPORT:
+        await query.message.reply_text("תפריט תומך – בהמשך אפשר להציג פרופיל, קישור אישי ועוד.")
+        return ConversationHandler.END
+
+    if data == CALLBACK_MENU_EXPERT:
+        await query.message.reply_text("פאנל מומחה – בהמשך אפשר להציג סטטוס, מקום, קישור מומחה ועוד.")
+        return ConversationHandler.END
+
+    if data == CALLBACK_MENU_ADMIN:
+        from bot.keyboards import build_admin_panel_keyboard
+        await query.message.reply_text("🛠️ פאנל אדמין", reply_markup=build_admin_panel_keyboard())
+        return ConversationHandler.END
+
+    if data == CALLBACK_APPLY_SUPPORTER:
+        await query.message.reply_text("נרשום אותך כתומך. איך קוראים לך?")
+        return SUPPORTER_NAME
+
+    if data == CALLBACK_APPLY_EXPERT:
+        await query.message.reply_text("נתחיל מחדש את תהליך המומחה. מה שמך המלא?")
+        return EXPERT_NAME
+
+    return ConversationHandler.END
+
+
+# ===============================
+# ConversationHandler הראשי
+# ===============================
 
 def get_conversation_handler() -> ConversationHandler:
     return ConversationHandler(
-        entry_points=[
-            CommandHandler("start", start),
-        ],
+        entry_points=[],
         states={
-            CHOOSING_ROLE: [
-                CallbackQueryHandler(choose_role, pattern="^(supporter|expert)$"),
-                CommandHandler("start", start),
-            ],
-            SUPPORTER_NAME: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_name),
-                CommandHandler("start", start),
-            ],
-            SUPPORTER_CITY: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_city),
-                CommandHandler("start", start),
-            ],
-            SUPPORTER_EMAIL: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_email),
-                CommandHandler("start", start),
-            ],
-            SUPPORTER_PHONE: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_phone),
-                CommandHandler("start", start),
-            ],
-            SUPPORTER_FEEDBACK: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_feedback),
-                CommandHandler("start", start),
-            ],
-            EXPERT_NAME: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, expert_name),
-                CommandHandler("start", start),
-            ],
-            EXPERT_FIELD: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, expert_field),
-                CommandHandler("start", start),
-            ],
-            EXPERT_EXPERIENCE: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, expert_experience),
-                CommandHandler("start", start),
-            ],
-            EXPERT_POSITION: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, expert_position),
-                CommandHandler("start", start),
-            ],
-            EXPERT_LINKS: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, expert_links),
-                CommandHandler("start", start),
-            ],
-            EXPERT_WHY: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, expert_why),
-                CommandHandler("start", start),
-            ],
+            SUPPORTER_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_handlers.supporter_name)],
+            SUPPORTER_CITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_handlers.supporter_city)],
+            SUPPORTER_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_handlers.supporter_email)],
+            SUPPORTER_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_handlers.supporter_phone)],
+            SUPPORTER_FEEDBACK: [MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_handlers.supporter_feedback)],
+
+            EXPERT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, expert_handlers.expert_name)],
+            EXPERT_FIELD: [MessageHandler(filters.TEXT & ~filters.COMMAND, expert_handlers.expert_field)],
+            EXPERT_EXPERIENCE: [MessageHandler(filters.TEXT & ~filters.COMMAND, expert_handlers.expert_experience)],
+            EXPERT_POSITION: [MessageHandler(filters.TEXT & ~filters.COMMAND, expert_handlers.expert_position)],
+            EXPERT_LINKS: [MessageHandler(filters.TEXT & ~filters.COMMAND, expert_handlers.expert_links)],
+            EXPERT_WHY: [MessageHandler(filters.TEXT & ~filters.COMMAND, expert_handlers.expert_why)],
         },
         fallbacks=[
-            CommandHandler("cancel", cancel),
             CommandHandler("start", start),
+            CommandHandler("menu", menu_command),
         ],
-        allow_reentry=True,
-        per_message=False,
     )
