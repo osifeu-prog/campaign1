@@ -25,14 +25,7 @@ class ABTestAssignment:
 
 
 class Telemetry:
-    """
-    אחראי על:
-    - תיעוד אירועים (analytics)
-    - שיוך משתמשים ל־A/B variants
-    """
-
     def __init__(self):
-        # experiment_name -> dict(user_id -> variant)
         self._experiments: Dict[str, Dict[int, Variant]] = {}
 
     def get_variant(self, experiment: str, user: User) -> Variant:
@@ -43,7 +36,6 @@ class Telemetry:
         if user.id in exp_map:
             return exp_map[user.id]
 
-        # hash-based deterministic assignment
         h = hashlib.sha256(f"{experiment}:{user.id}".encode()).hexdigest()
         variant: Variant = "A" if int(h, 16) % 2 == 0 else "B"
         exp_map[user.id] = variant
