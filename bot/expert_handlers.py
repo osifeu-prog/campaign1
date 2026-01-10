@@ -15,7 +15,14 @@ from bot.states import (
     EXPERT_LINKS,
     EXPERT_WHY,
 )
-from utils.constants import ROLE_EXPERT, CALLBACK_MENU_MAIN, CALLBACK_APPLY_EXPERT, CALLBACK_MENU_EXPERT
+from utils.constants import (
+    ROLE_EXPERT,
+    CALLBACK_MENU_MAIN,
+    CALLBACK_MENU_EXPERT,
+    CALLBACK_APPLY_EXPERT,
+    LOG_GROUP_ID,
+    MAX_POSITIONS,
+)
 from services import sheets_service
 from services.logger_service import log
 
@@ -47,8 +54,10 @@ async def expert_field(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def expert_experience(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["expert_experience"] = update.message.text.strip()
-    await log(context, "Expert experience entered", user=update.effective_user)
-    await update.message.reply_text("על איזה מספר מקום מתוך 121 תרצה להתמודד?")
+    await log(context, "Expert experience entered", user=update.effective_user, extra={
+        "expert_experience": context.user_data["expert_experience"]
+    })
+    await update.message.reply_text(f"על איזה מספר מקום מתוך {MAX_POSITIONS} תרצה להתמודד?")
     return EXPERT_POSITION
 
 
@@ -56,12 +65,12 @@ async def expert_position(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
 
     if not text.isdigit():
-        await update.message.reply_text("נא להכניס מספר בין 1 ל-121.")
+        await update.message.reply_text(f"נא להכניס מספר בין 1 ל-{MAX_POSITIONS}.")
         return EXPERT_POSITION
 
     pos_num = int(text)
-    if not (1 <= pos_num <= 121):
-        await update.message.reply_text("נא לבחור מספר מקום בין 1 ל-121.")
+    if not (1 <= pos_num <= MAX_POSITIONS):
+        await update.message.reply_text(f"נא לבחור מספר מקום בין 1 ל-{MAX_POSITIONS}.")
         return EXPERT_POSITION
 
     if not sheets_service.position_is_free(str(pos_num)):
@@ -69,6 +78,9 @@ async def expert_position(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return EXPERT_POSITION
 
     context.user_data["expert_position"] = str(pos_num)
+
+    if "created_at" not in context.user_data:
+        context.user_data["created_at"] = datetime.utcnow().isoformat()
 
     sheets_service.assign_position(
         position_id=str(pos_num),
@@ -89,13 +101,22 @@ async def expert_position(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def expert_links(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["expert_links"] = update.message.text.strip()
-    await log(context, "Expert links entered", user=update.effective_user)
+    await log(context, "Expert links entered", user=update.effective_user, extra={
+        "expert_links": context.user_data["expert_links"]
+    })
     await update.message.reply_text("כתוב כמה משפטים עליך:")
     return EXPERT_WHY
 
 
 async def expert_why(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["expert_why"] = update.message.text.strip()
+
+    if len(context.user_data["expert_why"]) < 20:
+        await update.message.reply_text("נשמח לכמה משפטים נוספים (לפחות 20 תווים).")
+        return EXPERT_WHY
+
+    if "created_at" not in context.user_data:
+        context.user_data["created_at"] = datetime.utcnow().isoformat()
 
     user_row = {
         "user_id": context.user_data.get("user_id"),
@@ -119,18 +140,14 @@ async def expert_why(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "expert_why": context.user_data.get("expert_why"),
         "created_at": context.user_data.get("created_at"),
         "group_link": "",
+        "status": "pending",
     }
 
     sheets_service.append_user_row(user_row)
     sheets_service.append_expert_row(expert_row)
 
-    await log(context, "Expert application submitted", user=update.effective_user, extra={
-        "expert_full_name": expert_row["expert_full_name"],
-        "expert_field": expert_row["expert_field"],
-        "expert_position": expert_row["expert_position"],
-    })
+    await log(context, "Expert application submitted", user=update.effective_user, extra=expert_row)
 
-    from utils.constants import LOG_GROUP_ID
     if LOG_GROUP_ID:
         keyboard = InlineKeyboardMarkup([
             [
