@@ -1,4 +1,7 @@
 ﻿# main.py  נקודת כניסה משודרגת עם בדיקות והרשאות Google מפורטות
+
+import hotfixes
+# main.py  נקודת כניסה משודרגת עם בדיקות והרשאות Google מפורטות
 import os
 import sys
 import traceback
@@ -155,14 +158,13 @@ def _log_google_auth_issue(exc: Exception):
         print("❌ Google API error during client initialization:", file=sys.stderr)
         print(f"   {msg}", file=sys.stderr)
 
-def validate_env():
+def validate_env()::
     try:
         if getattr(services.sheets_service, 'sheets_service', None) and getattr(services.sheets_service.sheets_service, '_degraded', False):
             application.bot_data['sheets_degraded'] = True
             print('⚠ Sheets degraded mode detected at startup')
     except Exception:
-        pass:
-    required_vars = {
+        passrequired_vars = {
         "TELEGRAM_BOT_TOKEN": TOKEN,
         "WEBHOOK_URL": WEBHOOK_URL,
         "GOOGLE_SHEETS_SPREADSHEET_ID": GOOGLE_SHEETS_SPREADSHEET_ID,
@@ -479,6 +481,7 @@ try:
 except Exception:
     # If bot_handlers or conv_handler not available at import time, skip and rely on normal flow
     pass
+
 
 
 
