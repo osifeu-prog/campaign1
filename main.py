@@ -1,110 +1,209 @@
 # ===============================
-# handlers/bot_handlers – Router ראשי
+# main.py – נקודת כניסה לבוט
 # ===============================
 
+import os
+import sys
+import traceback
+
+from fastapi import FastAPI, Request
 from telegram import Update
 from telegram.ext import (
-    ContextTypes,
-    ConversationHandler,
+    ApplicationBuilder,
     CommandHandler,
+    CallbackQueryHandler,
     MessageHandler,
     filters,
 )
 
-from bot.handlers import supporter_handlers, expert_handlers
-from bot.states import (
-    SUPPORTER_NAME,
-    SUPPORTER_CITY,
-    SUPPORTER_EMAIL,
-    SUPPORTER_PHONE,
-    SUPPORTER_FEEDBACK,
-    EXPERT_NAME,
-    EXPERT_FIELD,
-    EXPERT_EXPERIENCE,
-    EXPERT_POSITION,
-    EXPERT_LINKS,
-    EXPERT_WHY,
+from bot.handlers import bot_handlers
+from bot.handlers.admin_handlers import (
+    list_positions,
+    position_details,
+    assign_position_cmd,
+    reset_position_cmd,
+    reset_all_positions_cmd,
+    fix_sheets,
+    validate_sheets,
+    sheet_info,
+    clear_expert_duplicates_cmd,
+    clear_user_duplicates_cmd,
+    find_user,
+    find_expert,
+    find_position,
+    list_approved_experts,
+    list_rejected_experts,
+    list_supporters,
+    admin_menu,
+    expert_admin_callback,
+    broadcast_supporters,
+    broadcast_experts,
 )
-from bot.flows.start_flow import handle_start, handle_start_callback
-from bot.flows.menu_flow import handle_menu_command, handle_menu_callback
-from bot.core.locale_service import locale_service
-from services.logger_service import log
+from services import sheets_service
+from utils.constants import (
+    CALLBACK_START_SLIDE,
+    CALLBACK_START_SOCI,
+    CALLBACK_START_FINISH,
+)
+
+# ===============================
+# ENV
+# ===============================
+
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # לדוגמה: https://campaign1-production.up.railway.app/webhook
+
+if not TOKEN:
+    print("❌ ERROR: Missing TELEGRAM_BOT_TOKEN", file=sys.stderr)
+    raise SystemExit(1)
+
+if not WEBHOOK_URL:
+    print("❌ ERROR: Missing WEBHOOK_URL", file=sys.stderr)
+    raise SystemExit(1)
+
+# ===============================
+# FastAPI + Telegram Application
+# ===============================
+
+app = FastAPI()
+
+application = (
+    ApplicationBuilder()
+    .token(TOKEN)
+    .concurrent_updates(True)  # יציבות גבוהה יותר בעומס
+    .build()
+)
 
 
 # ===============================
-# פקודות כלליות
+# בדיקת ENV
 # ===============================
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await handle_start(update, context)
-
-
-async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await handle_menu_command(update, context)
-
-
-async def all_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await log(context, "All commands requested", user=update.effective_user)
-    text = (
-        "/start – התחלה מחדש\n"
-        "/menu – פתיחת תפריט ראשי\n"
-        "/help – רשימת פקודות\n"
-        "/myid – הצגת ה־user_id שלך\n"
-        "/groupid – הצגת group id (בקבוצה)\n"
-    )
-    await update.message.reply_text(text)
-
-
-async def my_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    await log(context, "my_id requested", user=update.effective_user)
-    await update.message.reply_text(f"user_id שלך: {user_id}")
-
-
-async def group_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat = update.effective_chat
-    await log(context, "group_id requested", user=update.effective_user, extra={"chat_id": chat.id})
-    await update.message.reply_text(f"group/chat id: {chat.id}")
-
-
-async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    lang = locale_service.detect_language(user.language_code)
-    await log(context, "Unknown command", user=user, extra={"text": update.message.text})
-    await update.message.reply_text(locale_service.t("unknown_command", lang=lang))
+def validate_env():
+    if not TOKEN:
+        raise Exception("Missing TELEGRAM_BOT_TOKEN")
+    if not sheets_service.SPREADSHEET_ID:
+        raise Exception("Missing GOOGLE_SHEETS_SPREADSHEET_ID")
 
 
 # ===============================
-# קרוסלת /start – callback handler
+# Startup – טעינת הבוט
 # ===============================
 
-async def handle_start_callback_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await handle_start_callback(update, context)
+@app.on_event("startup")
+async def startup_event():
+    """
+    אתחול הבוט:
+    - בדיקת ENV
+    - Smart Validation לגיליונות
+    - רישום כל ה־handlers
+    - הפעלת הבוט
+    """
+
+    print("🚀 Starting bot initialization...")
+
+    try:
+        validate_env()
+    except Exception as e:
+        print(f"❌ ENV validation failed: {e}", file=sys.stderr)
+        raise
+
+    print("🔍 Running Smart Validation on Google Sheets...")
+
+    try:
+        sheets_service.smart_validate_sheets()
+        print("✔ Sheets validated successfully")
+    except Exception as e:
+        print("❌ CRITICAL: Smart Validation failed!", file=sys.stderr)
+        print(e)
+        traceback.print_exc()
+        # לא מפילים את הבוט – מאפשרים לאדמין לתקן דרך הפאנל
+        print("⚠️ Continuing startup WITHOUT sheet validation.")
+
+    print("🔧 Initializing bot handlers...")
+
+    # ConversationHandler הראשי
+    conv_handler = bot_handlers.get_conversation_handler()
+    application.add_handler(conv_handler)
+
+    # --- סדר נכון של CallbackQueryHandlers ---
+
+    # 1) callbacks של אישור/דחיית מומחים
+    application.add_handler(CallbackQueryHandler(
+        expert_admin_callback,
+        pattern=r"^expert_(approve|reject):"
+    ))
+
+    # 2) callbacks של קרוסלת /start
+    application.add_handler(CallbackQueryHandler(
+        bot_handlers.handle_start_callback,
+        pattern=rf"^{CALLBACK_START_SLIDE}:|^{CALLBACK_START_SOCI}$|^{CALLBACK_START_FINISH}$"
+    ))
+
+    # 3) כל שאר ה־callbacks של התפריטים
+    application.add_handler(CallbackQueryHandler(
+        bot_handlers.handle_menu_callback
+    ))
+
+    # --- פקודות כלליות ---
+    application.add_handler(CommandHandler("start", bot_handlers.start))
+    application.add_handler(CommandHandler("menu", bot_handlers.menu_command))
+    application.add_handler(CommandHandler("help", bot_handlers.all_commands))
+    application.add_handler(CommandHandler("myid", bot_handlers.my_id))
+    application.add_handler(CommandHandler("groupid", bot_handlers.group_id))
+
+    # --- פקודות אדמין – מקומות ---
+    application.add_handler(CommandHandler("positions", list_positions))
+    application.add_handler(CommandHandler("position", position_details))
+    application.add_handler(CommandHandler("assign", assign_position_cmd))
+    application.add_handler(CommandHandler("reset_position", reset_position_cmd))
+    application.add_handler(CommandHandler("reset_all_positions", reset_all_positions_cmd))
+
+    # --- פקודות אדמין – שיטס ---
+    application.add_handler(CommandHandler("fix_sheets", fix_sheets))
+    application.add_handler(CommandHandler("validate_sheets", validate_sheets))
+    application.add_handler(CommandHandler("sheet_info", sheet_info))
+    application.add_handler(CommandHandler("clear_expert_duplicates", clear_expert_duplicates_cmd))
+    application.add_handler(CommandHandler("clear_user_duplicates", clear_user_duplicates_cmd))
+
+    # --- פקודות אדמין – חיפוש ורשימות ---
+    application.add_handler(CommandHandler("find_user", find_user))
+    application.add_handler(CommandHandler("find_expert", find_expert))
+    application.add_handler(CommandHandler("find_position", find_position))
+    application.add_handler(CommandHandler("list_approved_experts", list_approved_experts))
+    application.add_handler(CommandHandler("list_rejected_experts", list_rejected_experts))
+    application.add_handler(CommandHandler("list_supporters", list_supporters))
+    application.add_handler(CommandHandler("admin_menu", admin_menu))
+
+    # --- פקודות אדמין – שידור ---
+    application.add_handler(CommandHandler("broadcast_supporters", broadcast_supporters))
+    application.add_handler(CommandHandler("broadcast_experts", broadcast_experts))
+
+    # --- פקודות לא מוכרות ---
+    application.add_handler(MessageHandler(filters.COMMAND, bot_handlers.unknown_command))
+
+    # --- הפעלת הבוט ---
+    await application.initialize()
+    await application.start()
+
+    print("🤖 Bot initialized and running!")
 
 
 # ===============================
-# ConversationHandler הראשי
+# Webhook endpoint
 # ===============================
 
-def get_conversation_handler() -> ConversationHandler:
-    return ConversationHandler(
-        entry_points=[],
-        states={
-            SUPPORTER_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_handlers.supporter_name)],
-            SUPPORTER_CITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_handlers.supporter_city)],
-            SUPPORTER_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_handlers.supporter_email)],
-            SUPPORTER_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_handlers.supporter_phone)],
-            SUPPORTER_FEEDBACK: [MessageHandler(filters.TEXT & ~filters.COMMAND, supporter_handlers.supporter_feedback)],
+@app.post("/webhook")
+async def telegram_webhook(request: Request):
+    """
+    נקודת קצה לקבלת עדכונים מהטלגרם
+    """
+    try:
+        data = await request.json()
+        update = Update.de_json(data, application.bot)
+        await application.process_update(update)
+    except Exception as e:
+        print("❌ Error processing update:", e, file=sys.stderr)
+        traceback.print_exc()
 
-            EXPERT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, expert_handlers.expert_name)],
-            EXPERT_FIELD: [MessageHandler(filters.TEXT & ~filters.COMMAND, expert_handlers.expert_field)],
-            EXPERT_EXPERIENCE: [MessageHandler(filters.TEXT & ~filters.COMMAND, expert_handlers.expert_experience)],
-            EXPERT_POSITION: [MessageHandler(filters.TEXT & ~filters.COMMAND, expert_handlers.expert_position)],
-            EXPERT_LINKS: [MessageHandler(filters.TEXT & ~filters.COMMAND, expert_handlers.expert_links)],
-            EXPERT_WHY: [MessageHandler(filters.TEXT & ~filters.COMMAND, expert_handlers.expert_why)],
-        },
-        fallbacks=[
-            CommandHandler("start", start),
-            CommandHandler("menu", menu_command),
-        ],
-    )
+    return {"ok": True}
