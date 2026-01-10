@@ -19,8 +19,16 @@ from utils.constants import (
     CALLBACK_MENU_POSITIONS,
     CALLBACK_ADMIN_PENDING_EXPERTS,
     CALLBACK_ADMIN_GROUPS,
+    CALLBACK_ADMIN_SHEETS,
+    CALLBACK_ADMIN_SHEETS_INFO,
+    CALLBACK_ADMIN_SHEETS_FIX,
+    CALLBACK_ADMIN_SHEETS_VALIDATE,
+    CALLBACK_ADMIN_SHEETS_CLEAR_DUP,
+    CALLBACK_ADMIN_BROADCAST,
+    CALLBACK_ADMIN_EXPORT,
+    CALLBACK_ADMIN_QUICK_NAV,
 )
-from bot.keyboards import build_admin_panel_keyboard
+from bot.keyboards import build_admin_panel_keyboard, build_admin_sheets_keyboard
 from bot.expert_handlers import build_expert_referral_link
 
 
@@ -28,17 +36,22 @@ def is_admin(user_id: int) -> bool:
     return str(user_id) in ADMIN_IDS
 
 
-# ---------- פקודות שקשורות למקומות ----------
+# ---------- פקודות מקומות ----------
 
 async def list_positions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     positions = sheets_service.get_positions()
     await log(context, "List positions command", user=update.effective_user, extra={
         "positions_count": len(positions)
     })
-    text = "רשימת המקומות:\n\n"
+
+    if not positions:
+        await update.message.reply_text("אין מקומות מוגדרים כרגע.")
+        return
+
+    text = "📊 רשימת המקומות:\n\n"
     for pos in positions:
         status = "תפוס" if pos["expert_user_id"] else "פנוי"
-        text += f"{pos['position_id']}. {pos['title']} - {status}\n"
+        text += f"{pos['position_id']}. {pos['title']} – {status}\n"
     await update.message.reply_text(text)
 
 
@@ -61,10 +74,11 @@ async def position_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     text = (
-        f"מקום {pos['position_id']}\n"
+        f"🪪 מקום {pos['position_id']}\n"
         f"שם: {pos['title']}\n"
         f"תיאור: {pos['description']}\n"
-        f"מומחה: {pos['expert_user_id'] or 'אין'}"
+        f"מומחה: {pos['expert_user_id'] or 'אין'}\n"
+        f"תאריך שיוך: {pos.get('assigned_at', '—')}\n"
     )
     await update.message.reply_text(text)
 
@@ -89,7 +103,7 @@ async def assign_position_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE
         "assigned_to": target_user_id
     })
 
-    await update.message.reply_text("בוצע.")
+    await update.message.reply_text(f"מקום {position_id} שויך ל־{target_user_id}.")
 
 
 async def reset_position_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -131,14 +145,14 @@ async def reset_all_positions_cmd(update: Update, context: ContextTypes.DEFAULT_
         print("Error in reset_all_positions_cmd:", e)
 
 
-# ---------- פקודות שקשורות לשיטס (validate/fix/info/duplicates) ----------
+# ---------- שיטס: validate / fix / info / duplicates ----------
 
 async def fix_sheets(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         await update.message.reply_text("אין לך הרשאה.")
         return
 
-    await update.message.reply_text("מתקן כותרות בגיליונות...")
+    await update.message.reply_text("🔧 מתקן כותרות בגיליונות...")
 
     try:
         sheets_service.auto_fix_all_sheets()
@@ -152,7 +166,7 @@ async def validate_sheets(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("אין לך הרשאה.")
         return
 
-    await update.message.reply_text("בודק מבנה גיליונות...")
+    await update.message.reply_text("✔ בודק מבנה גיליונות...")
 
     try:
         sheets_service.validate_all_sheets()
@@ -171,22 +185,22 @@ async def sheet_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     positions = sheets_service.get_sheet_info(sheets_service.positions_sheet)
 
     text = (
-        "מידע על הגיליונות:\n\n"
-        f"Users:\n"
+        "📊 מידע על הגיליונות:\n\n"
+        f"*Users*\n"
         f"- כותרות: {', '.join(users['headers'])}\n"
         f"- שורות: {users['rows']}\n"
         f"- עמודות: {users['cols']}\n\n"
-        f"Experts:\n"
+        f"*Experts*\n"
         f"- כותרות: {', '.join(experts['headers'])}\n"
         f"- שורות: {experts['rows']}\n"
         f"- עמודות: {experts['cols']}\n\n"
-        f"Positions:\n"
+        f"*Positions*\n"
         f"- כותרות: {', '.join(positions['headers'])}\n"
         f"- שורות: {positions['rows']}\n"
         f"- עמודות: {positions['cols']}\n"
     )
 
-    await update.message.reply_text(text)
+    await update.message.reply_text(text, parse_mode="Markdown")
 
 
 async def clear_expert_duplicates_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -194,7 +208,7 @@ async def clear_expert_duplicates_cmd(update: Update, context: ContextTypes.DEFA
         await update.message.reply_text("אין לך הרשאה.")
         return
 
-    await update.message.reply_text("מוחק כפילויות בגיליון Experts...")
+    await update.message.reply_text("🧹 מוחק כפילויות בגיליון Experts...")
 
     try:
         deleted = sheets_service.clear_expert_duplicates()
@@ -208,7 +222,7 @@ async def clear_user_duplicates_cmd(update: Update, context: ContextTypes.DEFAUL
         await update.message.reply_text("אין לך הרשאה.")
         return
 
-    await update.message.reply_text("מוחק כפילויות בגיליון Users...")
+    await update.message.reply_text("🧹 מוחק כפילויות בגיליון Users...")
 
     try:
         deleted = sheets_service.clear_user_duplicates()
@@ -237,7 +251,7 @@ async def find_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     text = (
-        f"משתמש {user_id}:\n"
+        f"👤 משתמש {user_id}:\n"
         f"שם: {user.get('full_name_telegram', '')}\n"
         f"עיר: {user.get('city', '')}\n"
         f"אימייל: {user.get('email', '')}\n"
@@ -264,7 +278,7 @@ async def find_expert(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     text = (
-        f"מומחה {user_id}:\n"
+        f"🧠 מומחה {user_id}:\n"
         f"שם: {expert.get('expert_full_name', '')}\n"
         f"תחום: {expert.get('expert_field', '')}\n"
         f"ניסיון: {expert.get('expert_experience', '')}\n"
@@ -293,7 +307,7 @@ async def find_position(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     text = (
-        f"מקום {pos['position_id']}:\n"
+        f"🪪 מקום {pos['position_id']}:\n"
         f"שם: {pos['title']}\n"
         f"תיאור: {pos['description']}\n"
         f"מומחה: {pos['expert_user_id'] or 'אין'}\n"
@@ -301,8 +315,6 @@ async def find_position(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(text)
 
-
-# ---------- רשימות מומחים / תומכים (מבוסס על get_all_records במקום _load_*) ----------
 
 async def list_approved_experts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
@@ -316,7 +328,7 @@ async def list_approved_experts(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text("אין מומחים מאושרים.")
         return
 
-    text = "מומחים מאושרים:\n\n"
+    text = "🧠 מומחים מאושרים:\n\n"
     for row in approved:
         full_name = row.get("expert_full_name", "")
         field = row.get("expert_field", "")
@@ -338,7 +350,7 @@ async def list_rejected_experts(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text("אין מומחים שנדחו.")
         return
 
-    text = "מומחים שנדחו:\n\n"
+    text = "🧠 מומחים שנדחו:\n\n"
     for row in rejected:
         full_name = row.get("expert_full_name", "")
         field = row.get("expert_field", "")
@@ -359,7 +371,7 @@ async def list_supporters(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("אין תומכים.")
         return
 
-    text = "רשימת תומכים:\n\n"
+    text = "🧑‍🎓 רשימת תומכים:\n\n"
     for row in rows:
         full_name = row.get("full_name_telegram", "")
         user_id = row.get("user_id", "")
@@ -386,14 +398,14 @@ async def expert_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
             "expert_user_id": user_id
         })
         await notify_expert(context, user_id, True)
-        await query.edit_message_text("אושר.")
+        await query.edit_message_text("המומחה אושר.")
     else:
         sheets_service.update_expert_status(user_id, "rejected")
         await log(context, "Expert rejected", user=query.from_user, extra={
             "expert_user_id": user_id
         })
         await notify_expert(context, user_id, False)
-        await query.edit_message_text("נדחה.")
+        await query.edit_message_text("המומחה נדחה.")
 
 
 async def notify_expert(context: ContextTypes.DEFAULT_TYPE, user_id: str, approved: bool):
@@ -449,15 +461,20 @@ async def admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await log(context, "Admin menu command", user=user)
 
     text = (
-        "פאנל אדמין:\n\n"
-        "פקודות מרכזיות:\n"
-        "/positions – צפייה ברשימת כל המקומות\n"
+        "🛠️ פאנל אדמין – כלים מרכזיים:\n\n"
+        "מקומות:\n"
+        "/positions – רשימת כל המקומות\n"
         "/position <מספר> – פרטי מקום ספציפי\n"
         "/assign <מקום> <user_id> – שיוך מקום למשתמש\n"
         "/reset_position <מספר> – איפוס מקום יחיד\n"
-        "/reset_all_positions – איפוס כל המקומות\n"
-        "/set_expert_group <user_id> <link> – הגדרת קבוצה למומחה\n\n"
-        "כלי חיפוש:\n"
+        "/reset_all_positions – איפוס כל המקומות\n\n"
+        "שיטס:\n"
+        "/sheet_info – מידע על הגיליונות\n"
+        "/validate_sheets – בדיקת תקינות\n"
+        "/fix_sheets – תיקון כותרות\n"
+        "/clear_user_duplicates – ניקוי כפילויות מתומכים\n"
+        "/clear_expert_duplicates – ניקוי כפילויות ממומחים\n\n"
+        "חיפוש / רשימות:\n"
         "/find_user <user_id>\n"
         "/find_expert <user_id>\n"
         "/find_position <id>\n"
@@ -467,3 +484,186 @@ async def admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     await update.message.reply_text(text, reply_markup=build_admin_panel_keyboard())
+
+
+# ---------- תתי־תפריטים של אדמין דרך callbacks ----------
+
+async def handle_admin_callback(query, context: ContextTypes.DEFAULT_TYPE):
+    """
+    נקודת ריכוז ל־callbacks של אדמין שלא קשורים למומחים ממתינים (אותם מטפלים ב־bot_handlers).
+    """
+    user = query.from_user
+
+    if not is_admin(user.id):
+        await query.edit_message_text("אין לך הרשאה.")
+        return
+
+    data = query.data
+
+    # ניהול גיליונות – תפריט משנה
+    if data == CALLBACK_ADMIN_SHEETS:
+        users = sheets_service.get_sheet_info(sheets_service.users_sheet)
+        experts = sheets_service.get_sheet_info(sheets_service.experts_sheet)
+        positions = sheets_service.get_sheet_info(sheets_service.positions_sheet)
+
+        text = (
+            "📊 ניהול גיליונות:\n\n"
+            f"Users – {users['rows']} שורות, {users['cols']} עמודות\n"
+            f"Experts – {experts['rows']} שורות, {experts['cols']} עמודות\n"
+            f"Positions – {positions['rows']} שורות, {positions['cols']} עמודות\n\n"
+            "בחר פעולה:"
+        )
+        await query.edit_message_text(text, reply_markup=build_admin_sheets_keyboard())
+        return
+
+    # מידע על הגיליונות
+    if data == CALLBACK_ADMIN_SHEETS_INFO:
+        users = sheets_service.get_sheet_info(sheets_service.users_sheet)
+        experts = sheets_service.get_sheet_info(sheets_service.experts_sheet)
+        positions = sheets_service.get_sheet_info(sheets_service.positions_sheet)
+
+        text = (
+            "📊 מידע מפורט על הגיליונות:\n\n"
+            f"*Users*\n"
+            f"- כותרות: {', '.join(users['headers'])}\n"
+            f"- שורות: {users['rows']}\n"
+            f"- עמודות: {users['cols']}\n\n"
+            f"*Experts*\n"
+            f"- כותרות: {', '.join(experts['headers'])}\n"
+            f"- שורות: {experts['rows']}\n"
+            f"- עמודות: {experts['cols']}\n\n"
+            f"*Positions*\n"
+            f"- כותרות: {', '.join(positions['headers'])}\n"
+            f"- שורות: {positions['rows']}\n"
+            f"- עמודות: {positions['cols']}\n"
+        )
+        await query.edit_message_text(text, parse_mode="Markdown", reply_markup=build_admin_sheets_keyboard())
+        return
+
+    # תיקון גיליונות
+    if data == CALLBACK_ADMIN_SHEETS_FIX:
+        await query.edit_message_text("🔧 מריץ תיקון כותרות בגיליונות...")
+        try:
+            sheets_service.auto_fix_all_sheets()
+            await query.edit_message_text("✔ תיקון כותרות בוצע בהצלחה.", reply_markup=build_admin_sheets_keyboard())
+        except Exception as e:
+            await query.edit_message_text(f"❌ שגיאה בתיקון הכותרות:\n{e}", reply_markup=build_admin_sheets_keyboard())
+        return
+
+    # בדיקת תקינות
+    if data == CALLBACK_ADMIN_SHEETS_VALIDATE:
+        await query.edit_message_text("✔ בודק מבנה גיליונות...")
+        try:
+            sheets_service.validate_all_sheets()
+            await query.edit_message_text("✔ כל הגיליונות תקינים.", reply_markup=build_admin_sheets_keyboard())
+        except Exception as e:
+            await query.edit_message_text(f"❌ בעיה במבנה הגיליונות:\n{e}", reply_markup=build_admin_sheets_keyboard())
+        return
+
+    # ניקוי כפילויות
+    if data == CALLBACK_ADMIN_SHEETS_CLEAR_DUP:
+        await query.edit_message_text("🧹 מנקה כפילויות ב־Users ו־Experts...")
+        try:
+            u_deleted = sheets_service.clear_user_duplicates()
+            e_deleted = sheets_service.clear_expert_duplicates()
+            await query.edit_message_text(
+                f"✔ נמחקו {u_deleted} כפילויות מתומכים ו־{e_deleted} כפילויות ממומחים.",
+                reply_markup=build_admin_sheets_keyboard(),
+            )
+        except Exception as e:
+            await query.edit_message_text(f"❌ שגיאה בניקוי כפילויות:\n{e}", reply_markup=build_admin_sheets_keyboard())
+        return
+
+    # שידור – הדרכה
+    if data == CALLBACK_ADMIN_BROADCAST:
+        text = (
+            "📨 שליחת הודעה לתומכים / מומחים:\n\n"
+            "כרגע מוגדר שידור דרך פקודות:\n"
+            "- /broadcast_supporters <טקסט>\n"
+            "- /broadcast_experts <טקסט>\n\n"
+            "ההודעות נשלחות לקבוצות שהוגדרו ב־ENV:\n"
+            f"SUPPORT_GROUP_ID: {SUPPORT_GROUP_ID or 'לא מוגדר'}\n"
+            f"EXPERTS_GROUP_ID: {EXPERTS_GROUP_ID or 'לא מוגדר'}\n\n"
+            "לשינוי – עדכן את משתני הסביבה."
+        )
+        await query.edit_message_text(text, reply_markup=build_admin_panel_keyboard())
+        return
+
+    # יצוא נתונים – טקסט
+    if data == CALLBACK_ADMIN_EXPORT:
+        users = sheets_service.users_sheet.get_all_records()
+        experts = sheets_service.experts_sheet.get_all_records()
+
+        text = (
+            "📁 יצוא נתונים (תמציתי):\n\n"
+            f"Users: {len(users)} רשומות\n"
+            f"Experts: {len(experts)} רשומות\n\n"
+            "להורדה מפורטת – השתמש ישירות בגוגל שיטס.\n"
+        )
+        await query.edit_message_text(text, reply_markup=build_admin_panel_keyboard())
+        return
+
+    # ניווט מהיר
+    if data == CALLBACK_ADMIN_QUICK_NAV:
+        text = (
+            "🧭 ניווט מהיר לאדמין:\n\n"
+            "מקומות:\n"
+            "/positions\n"
+            "/position <id>\n\n"
+            "שיטס:\n"
+            "/sheet_info\n"
+            "/validate_sheets\n"
+            "/fix_sheets\n\n"
+            "חיפוש ורשימות:\n"
+            "/find_user <user_id>\n"
+            "/find_expert <user_id>\n"
+            "/find_position <id>\n"
+            "/list_approved_experts\n"
+            "/list_rejected_experts\n"
+            "/list_supporters\n\n"
+            "שידור:\n"
+            "/broadcast_supporters <טקסט>\n"
+            "/broadcast_experts <טקסט>\n"
+        )
+        await query.edit_message_text(text, reply_markup=build_admin_panel_keyboard())
+        return
+
+
+# ---------- שידור פשוט לקבוצות (commands) ----------
+
+async def broadcast_supporters(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("אין לך הרשאה.")
+        return
+
+    if not SUPPORT_GROUP_ID:
+        await update.message.reply_text("SUPPORT_GROUP_ID לא מוגדר ב־ENV.")
+        return
+
+    args = update.message.text.split(" ", maxsplit=1)
+    if len(args) < 2:
+        await update.message.reply_text("שימוש: /broadcast_supporters <טקסט ההודעה>")
+        return
+
+    text = args[1]
+    await context.bot.send_message(chat_id=int(SUPPORT_GROUP_ID), text=text)
+    await update.message.reply_text("הודעה נשלחה לקבוצת התומכים.")
+
+
+async def broadcast_experts(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("אין לך הרשאה.")
+        return
+
+    if not EXPERTS_GROUP_ID:
+        await update.message.reply_text("EXPERTS_GROUP_ID לא מוגדר ב־ENV.")
+        return
+
+    args = update.message.text.split(" ", maxsplit=1)
+    if len(args) < 2:
+        await update.message.reply_text("שימוש: /broadcast_experts <טקסט ההודעה>")
+        return
+
+    text = args[1]
+    await context.bot.send_message(chat_id=int(EXPERTS_GROUP_ID), text=text)
+    await update.message.reply_text("הודעה נשלחה לקבוצת המומחים.")
