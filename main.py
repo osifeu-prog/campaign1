@@ -1,7 +1,7 @@
 # main.py
 # ==========================================
-# נקודת הכניסה הראשית של הבוט
-# FastAPI + Telegram Webhook + Handlers
+# Campaign1 Bot – Full Production Entry Point
+# FastAPI + Telegram Webhook + All Handlers
 # ==========================================
 
 import os
@@ -17,6 +17,10 @@ from telegram.ext import (
     filters,
 )
 
+# Core
+from bot.core.monitoring import monitoring
+
+# Handlers
 from bot.handlers import bot_handlers
 from bot.handlers.admin_handlers import (
     list_positions,
@@ -44,7 +48,6 @@ from bot.handlers.admin_handlers import (
     export_metrics_command,
     handle_experts_pagination,
     handle_supporters_pagination,
-    backup_sheets_cmd,
 )
 from bot.handlers.donation_handlers import (
     handle_donation_callback,
@@ -56,8 +59,7 @@ from bot.handlers.image_handlers import (
     handle_animation_message,
 )
 
-from bot.core.monitoring import monitoring
-from services.sheets_service import sheets_service
+# Constants
 from utils.constants import (
     TELEGRAM_BOT_TOKEN,
     WEBHOOK_URL,
@@ -69,10 +71,13 @@ from utils.constants import (
     CALLBACK_START_FINISH,
 )
 
+# Sheets
+from services.sheets_service import sheets_service
 
-# ===============================
-# FastAPI app
-# ===============================
+
+# ==========================================
+# FastAPI App
+# ==========================================
 
 app = FastAPI(title="Campaign1 Bot API", version="2.0.0")
 
@@ -84,13 +89,13 @@ application = (
 )
 
 
-# ===============================
+# ==========================================
 # Startup
-# ===============================
+# ==========================================
 
 @app.on_event("startup")
 async def startup_event():
-    print("🚀 Starting bot...")
+    print("🚀 Starting Campaign1 Bot...")
 
     # Validate Google Sheets
     try:
@@ -110,10 +115,9 @@ async def startup_event():
     application.add_handler(CallbackQueryHandler(handle_ton_info_callback, pattern=CALLBACK_TON_INFO))
     application.add_handler(CallbackQueryHandler(handle_experts_pagination, pattern=r"^experts_page"))
     application.add_handler(CallbackQueryHandler(handle_supporters_pagination, pattern=r"^supporters_page"))
+    application.add_handler(CallbackQueryHandler(bot_handlers.handle_start_callback_entry,
+                                                pattern=rf"^{CALLBACK_START_SLIDE}:|^{CALLBACK_START_SOCI}$|^{CALLBACK_START_FINISH}$"))
     application.add_handler(CallbackQueryHandler(bot_handlers.handle_menu_callback))
-    application.add_handler(CallbackQueryHandler(bot_handlers.start, pattern=CALLBACK_START_SLIDE))
-    application.add_handler(CallbackQueryHandler(bot_handlers.start, pattern=CALLBACK_START_SOCI))
-    application.add_handler(CallbackQueryHandler(bot_handlers.start, pattern=CALLBACK_START_FINISH))
 
     # Commands
     application.add_handler(CommandHandler("start", bot_handlers.start))
@@ -121,6 +125,8 @@ async def startup_event():
     application.add_handler(CommandHandler("help", bot_handlers.all_commands))
     application.add_handler(CommandHandler("myid", bot_handlers.my_id))
     application.add_handler(CommandHandler("groupid", bot_handlers.group_id))
+
+    # Admin commands
     application.add_handler(CommandHandler("positions", list_positions))
     application.add_handler(CommandHandler("position", position_details))
     application.add_handler(CommandHandler("assign", assign_position_cmd))
@@ -131,7 +137,6 @@ async def startup_event():
     application.add_handler(CommandHandler("sheet_info", sheet_info))
     application.add_handler(CommandHandler("clear_user_duplicates", clear_user_duplicates_cmd))
     application.add_handler(CommandHandler("clear_expert_duplicates", clear_expert_duplicates_cmd))
-    application.add_handler(CommandHandler("backup_sheets", backup_sheets_cmd))
     application.add_handler(CommandHandler("find_user", find_user))
     application.add_handler(CommandHandler("find_expert", find_expert))
     application.add_handler(CommandHandler("find_position", find_position))
@@ -161,12 +166,12 @@ async def startup_event():
     await application.bot.set_webhook(final_url, drop_pending_updates=True)
     print(f"✔ Webhook set: {final_url}")
 
-    print("🤖 Bot is running!")
+    print("🤖 Campaign1 Bot is running!")
 
 
-# ===============================
-# Webhook endpoint
-# ===============================
+# ==========================================
+# Webhook Endpoint
+# ==========================================
 
 @app.post("/webhook")
 async def telegram_webhook(request: Request):
@@ -187,9 +192,9 @@ async def telegram_webhook(request: Request):
         return {"ok": False}
 
 
-# ===============================
-# Health check
-# ===============================
+# ==========================================
+# Health Check
+# ==========================================
 
 @app.get("/health")
 async def health():
