@@ -43,6 +43,8 @@ class SheetsService:
         self.SPREADSHEET_ID = SPREADSHEET_ID
 
     def _init_client(self):
+        try:
+# Degraded-mode guard: if Sheets API fails (rate limit etc.), set _degraded and continue
         if self._client and self._spreadsheet:
             return
         creds_json = os.getenv("GOOGLE_CREDENTIALS_JSON", "")
@@ -62,8 +64,11 @@ class SheetsService:
         if not self.SPREADSHEET_ID:
             raise Exception("GOOGLE_SHEETS_SPREADSHEET_ID not set")
         self._spreadsheet = self._client.open_by_key(self.SPREADSHEET_ID)
-
-    def _get_sheet(self, name: str):
+        except Exception as e:
+            # Log and mark degraded; do not crash startup
+            print('⚠ Sheets init failed, entering degraded mode:', e)
+            self._degraded = True
+            returndef _get_sheet(self, name: str):
         self._init_client()
         try:
             return self._spreadsheet.worksheet(name)
@@ -335,3 +340,4 @@ __all__ = [
     "clear_expert_duplicates",
     "smart_validate_sheets",
 ]
+
