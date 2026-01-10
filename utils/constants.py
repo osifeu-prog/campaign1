@@ -192,3 +192,20 @@ __all__ = [
     "CALLBACK_EXPERT_REJECT",
     "DEFAULT_PAGE_SIZE",
 ]
+# --- image / media settings ---
+# רשימת רזולוציות לבקשתך (width, height)
+IMAGE_SIZES = [(320, 180), (640, 360), (960, 540)]
+
+# תיקיית זמנית לשמירת מדיה לעיבוד
+TEMP_MEDIA_DIR = os.getenv("TEMP_MEDIA_DIR", "/tmp/campaign1_media")
+
+# מגבלות לעיבוד GIF/מדיה
+try:
+    MAX_GIF_DURATION_SECONDS = int(os.getenv("MAX_GIF_DURATION_SECONDS", "10"))
+except Exception:
+    MAX_GIF_DURATION_SECONDS = 10
+
+try:
+    MAX_MEDIA_FILESIZE_MB = int(os.getenv("MAX_MEDIA_FILESIZE_MB", "20"))
+except Exception:
+    MAX_MEDIA_FILESIZE_MB = 20
