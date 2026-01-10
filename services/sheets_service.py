@@ -392,10 +392,61 @@ class SheetsService:
     def validate_all_sheets(self):
         self.smart_validate_sheets()
 
+    # ---------- Compatibility helper methods used by flows/admin ----------
+
+    def get_expert_status(self, user_id: str) -> Optional[str]:
+        expert = self.get_expert_by_id(user_id)
+        if not expert:
+            return None
+        return expert.get("status")
+
+    def get_expert_position(self, user_id: str) -> Optional[str]:
+        expert = self.get_expert_by_id(user_id)
+        if not expert:
+            return None
+        return expert.get("expert_position")
+
+    def get_expert_group_link(self, user_id: str) -> Optional[str]:
+        expert = self.get_expert_by_id(user_id)
+        if not expert:
+            return None
+        return expert.get("group_link")
+
+    @retry(Exception, tries=3, delay=0.5)
+    def increment_expert_supporters(self, user_id: str, step: int = 1):
+        sheet = self.get_experts_sheet()
+        if not sheet:
+            return False
+        rows = sheet.get_all_records()
+        headers = sheet.row_values(1)
+        try:
+            col_idx = headers.index("supporters_count") + 1
+        except ValueError:
+            headers.append("supporters_count")
+            sheet.update("1:1", [headers])
+            col_idx = headers.index("supporters_count") + 1
+
+        def safe_int(x):
+            try:
+                return int(x)
+            except Exception:
+                return 0
+
+        with _lock:
+            for idx, r in enumerate(rows, start=2):
+                if str(r.get("user_id")) == str(user_id):
+                    current = safe_int(r.get("supporters_count", 0))
+                    sheet.update_cell(idx, col_idx, current + step)
+                    return True
+        return False
+
 
 sheets_service = SheetsService()
 
+# ===============================
 # Compatibility aliases for older callers
+# ===============================
+
 def append_user(user_record: Dict[str, Any]):
     return sheets_service.append_user(user_record)
 
@@ -403,10 +454,51 @@ def append_expert(expert_record: Dict[str, Any]):
     return sheets_service.append_expert(expert_record)
 
 def append_user_row(user_record: Dict[str, Any]):
-    return append_user(user_record)
+    return sheets_service.append_user(user_record)
 
 def append_expert_row(expert_record: Dict[str, Any]):
-    return append_expert(expert_record)
+    return sheets_service.append_expert(expert_record)
+
+# module-level aliases (so code like `from services import sheets_service` still works)
+def get_supporter_by_id(user_id: str) -> Optional[Dict[str, Any]]:
+    return sheets_service.get_supporter_by_id(user_id)
+
+def get_expert_by_id(user_id: str) -> Optional[Dict[str, Any]]:
+    return sheets_service.get_expert_by_id(user_id)
+
+def get_expert_status(user_id: str) -> Optional[str]:
+    return sheets_service.get_expert_status(user_id)
+
+def get_expert_position(user_id: str) -> Optional[str]:
+    return sheets_service.get_expert_position(user_id)
+
+def get_expert_group_link(user_id: str) -> Optional[str]:
+    return sheets_service.get_expert_group_link(user_id)
+
+def get_experts_leaderboard() -> List[Dict[str, Any]]:
+    return sheets_service.get_experts_leaderboard()
+
+def get_positions() -> List[Dict[str, Any]]:
+    return sheets_service.get_positions()
+
+def get_position(position_id: str) -> Optional[Dict[str, Any]]:
+    return sheets_service.get_position(position_id)
+
+def increment_expert_supporters(user_id: str, step: int = 1):
+    return sheets_service.increment_expert_supporters(user_id, step=step)
+
+def clear_user_duplicates() -> int:
+    return sheets_service.clear_user_duplicates()
+
+def clear_expert_duplicates() -> int:
+    return sheets_service.clear_expert_duplicates()
+
+def auto_fix_all_sheets():
+    return sheets_service.auto_fix_all_sheets()
+
+def validate_all_sheets():
+    return sheets_service.validate_all_sheets()
+
 
 __all__ = [
     "SPREADSHEET_ID",
@@ -415,9 +507,18 @@ __all__ = [
     "append_expert",
     "append_user_row",
     "append_expert_row",
-    "update_expert_status",
+    "get_supporter_by_id",
+    "get_expert_by_id",
+    "get_expert_status",
+    "get_expert_position",
+    "get_expert_group_link",
     "get_experts_leaderboard",
+    "get_positions",
+    "get_position",
+    "increment_expert_supporters",
     "clear_user_duplicates",
     "clear_expert_duplicates",
+    "auto_fix_all_sheets",
+    "validate_all_sheets",
     "smart_validate_sheets",
 ]
