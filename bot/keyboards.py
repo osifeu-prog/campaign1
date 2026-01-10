@@ -13,12 +13,16 @@ from utils.constants import (
     CALLBACK_ADMIN_GROUPS,
     CALLBACK_MENU_POSITIONS,
     CALLBACK_APPLY_EXPERT,
+    CALLBACK_ADMIN_SHEETS,
+    CALLBACK_ADMIN_BROADCAST,
+    CALLBACK_ADMIN_EXPORT,
+    CALLBACK_ADMIN_QUICK_NAV,
 )
 
 
 def build_main_menu_for_user(user_id: int, is_admin: bool) -> InlineKeyboardMarkup:
     """
-    בניית תפריט ראשי לפי האם המשתמש אדמין
+    תפריט ראשי למשתמש: תומך / מומחה / אדמין
     """
     buttons = [
         [InlineKeyboardButton("🧑‍🎓 הרשמה / פרופיל תומך", callback_data=CALLBACK_MENU_SUPPORT)],
@@ -52,7 +56,7 @@ def build_supporter_profile_keyboard(personal_link: str) -> InlineKeyboardMarkup
     מקלדת למסך 'פרופיל תומך'
     """
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📣 לשתף את הקישור שלי", url=personal_link)],
+        [InlineKeyboardButton("📣 לשתף את הקישור האישי", url=personal_link)],
         [InlineKeyboardButton("🧠 להגיש מועמדות כמומחה", callback_data=CALLBACK_MENU_EXPERT)],
         [InlineKeyboardButton("📋 תפריט ראשי", callback_data=CALLBACK_MENU_MAIN)],
     ])
@@ -62,10 +66,10 @@ def build_expert_panel_keyboard(status: str, referral_link: str | None) -> Inlin
     """
     מקלדת למסך 'פאנל מומחה'
     """
-    buttons = []
+    buttons: list[list[InlineKeyboardButton]] = []
 
     if status == "approved" and referral_link:
-        buttons.append([InlineKeyboardButton("📣 לשתף את הקישור שלי", url=referral_link)])
+        buttons.append([InlineKeyboardButton("📣 לשתף את קישור המומחה", url=referral_link)])
 
     if status in ("rejected", "approved"):
         buttons.append([InlineKeyboardButton("🧠 הגשת מועמדות מחדש", callback_data=CALLBACK_APPLY_EXPERT)])
@@ -77,11 +81,34 @@ def build_expert_panel_keyboard(status: str, referral_link: str | None) -> Inlin
 
 def build_admin_panel_keyboard() -> InlineKeyboardMarkup:
     """
-    מקלדת לפאנל אדמין
+    מקלדת לפאנל אדמין ראשי
     """
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📋 מומחים ממתינים", callback_data=CALLBACK_ADMIN_PENDING_EXPERTS)],
+        [InlineKeyboardButton("🧑‍⚖️ מומחים ממתינים", callback_data=CALLBACK_ADMIN_PENDING_EXPERTS)],
         [InlineKeyboardButton("📊 רשימת מקומות", callback_data=CALLBACK_MENU_POSITIONS)],
         [InlineKeyboardButton("🧩 ניהול קבוצות", callback_data=CALLBACK_ADMIN_GROUPS)],
+        [InlineKeyboardButton("📊 ניהול גיליונות", callback_data=CALLBACK_ADMIN_SHEETS)],
+        [InlineKeyboardButton("📨 שליחת הודעה לתומכים / מומחים", callback_data=CALLBACK_ADMIN_BROADCAST)],
+        [InlineKeyboardButton("📁 יצוא נתונים (טקסט)", callback_data=CALLBACK_ADMIN_EXPORT)],
+        [InlineKeyboardButton("🧭 ניווט מהיר", callback_data=CALLBACK_ADMIN_QUICK_NAV)],
         [InlineKeyboardButton("↩️ תפריט ראשי", callback_data=CALLBACK_MENU_MAIN)],
+    ])
+
+
+def build_admin_sheets_keyboard() -> InlineKeyboardMarkup:
+    """
+    מקלדת לפעולות על הגיליונות
+    """
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📊 מידע על הגיליונות", callback_data="admin_sheets_info"),
+        ],
+        [
+            InlineKeyboardButton("🔧 תיקון כותרות", callback_data="admin_sheets_fix"),
+            InlineKeyboardButton("✔ בדיקת תקינות", callback_data="admin_sheets_validate"),
+        ],
+        [
+            InlineKeyboardButton("🧹 ניקוי כפילויות", callback_data="admin_sheets_clear_dup"),
+        ],
+        [InlineKeyboardButton("↩️ חזרה לפאנל אדמין", callback_data=CALLBACK_MENU_ADMIN)],
     ])
