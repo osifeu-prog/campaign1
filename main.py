@@ -1,4 +1,4 @@
-# main.py – נקודת כניסה משודרגת (מתוקן: webhook path handling + request logging)
+# main.py – נקודת כניסה משודרגת (מתוקן: webhook path handling + request logging + image handlers)
 import os
 import sys
 import traceback
@@ -59,6 +59,9 @@ from utils.constants import (
     CALLBACK_TON_INFO,
 )
 from bot.core.monitoring import monitoring
+
+# image handlers (registered later)
+from bot.handlers import image_handlers
 
 # ===============================
 # ENV
@@ -144,23 +147,18 @@ async def startup_event():
     application.add_handler(conv_handler)
 
     # --- Callback handlers בסדר נכון ---
-
-    # 1) אישור/דחיית מומחים (pattern handled inside handler)
     application.add_handler(CallbackQueryHandler(
         expert_admin_callback,
         pattern=r"^expert_(approve|reject):"
     ))
 
-    # 2) תרומות - טיפול בקריאה ל־donate (מדויק)
     application.add_handler(CallbackQueryHandler(
         handle_donation_callback,
         pattern=rf"^{CALLBACK_DONATE}$"
     ))
-    # ספציפיים ל־donation callbacks (copy_wallet, ton_info)
     application.add_handler(CallbackQueryHandler(handle_copy_wallet_callback, pattern=rf"^{CALLBACK_COPY_WALLET}$"))
     application.add_handler(CallbackQueryHandler(handle_ton_info_callback, pattern=rf"^{CALLBACK_TON_INFO}$"))
 
-    # 3) Pagination
     application.add_handler(CallbackQueryHandler(
         handle_experts_pagination,
         pattern=r"^experts_page:"
@@ -170,13 +168,11 @@ async def startup_event():
         pattern=r"^supporters_page:"
     ))
 
-    # 4) קרוסלת /start
     application.add_handler(CallbackQueryHandler(
         bot_handlers.handle_start_callback_entry,
         pattern=rf"^{CALLBACK_START_SLIDE}:|^{CALLBACK_START_SOCI}$|^{CALLBACK_START_FINISH}$"
     ))
 
-    # 5) כל שאר ה־callbacks (menu_flow)
     application.add_handler(CallbackQueryHandler(
         bot_handlers.handle_menu_callback
     ))
@@ -226,6 +222,10 @@ async def startup_event():
 
     # --- פקודות לא מוכרות ---
     application.add_handler(MessageHandler(filters.COMMAND, bot_handlers.unknown_command))
+
+    # --- image handlers (photos / animations) ---
+    application.add_handler(MessageHandler(filters.PHOTO, image_handlers.handle_photo_message))
+    application.add_handler(MessageHandler(filters.ANIMATION | filters.Document.IMAGE, image_handlers.handle_animation_message))
 
     # --- הפעלת הבוט ---
     await application.initialize()
