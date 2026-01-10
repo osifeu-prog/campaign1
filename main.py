@@ -164,12 +164,15 @@ def validate_env():
             application.bot_data['sheets_degraded'] = True
             print('⚠ Sheets degraded mode detected at startup')
     except Exception:
-        passrequired_vars = {
-        "TELEGRAM_BOT_TOKEN": TOKEN,
-        "WEBHOOK_URL": WEBHOOK_URL,
-        "GOOGLE_SHEETS_SPREADSHEET_ID": GOOGLE_SHEETS_SPREADSHEET_ID,
-        "GOOGLE_CREDENTIALS_JSON": GOOGLE_CREDENTIALS_JSON,
-    }
+    pass
+
+required_vars = {
+    "TELEGRAM_BOT_TOKEN": TOKEN,
+    "WEBHOOK_URL": WEBHOOK_URL,
+    "GOOGLE_SHEETS_SPREADSHEET_ID": GOOGLE_SHEETS_SPREADSHEET_ID,
+    "GOOGLE_CREDENTIALS_JSON": GOOGLE_CREDENTIALS_JSON,
+}
+
     missing = [k for k, v in required_vars.items() if not v]
     if missing:
         raise Exception(f"Missing required ENV variables: {', '.join(missing)}")
@@ -481,6 +484,7 @@ try:
 except Exception:
     # If bot_handlers or conv_handler not available at import time, skip and rely on normal flow
     pass
+
 
 
 
