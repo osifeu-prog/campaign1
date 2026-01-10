@@ -10,7 +10,6 @@ from functools import wraps
 import gspread
 from google.oauth2.service_account import Credentials
 
-
 # Constants expected from utils/constants or env
 GOOGLE_SHEETS_SPREADSHEET_ID = os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID", "")
 USERS_SHEET_NAME = os.getenv("USERS_SHEET_NAME", "Telegram Leads")
