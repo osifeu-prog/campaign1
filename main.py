@@ -42,6 +42,7 @@ from bot.handlers.admin_handlers import (
     handle_experts_pagination,
     handle_supporters_pagination,
     leaderboard_command,
+    backup_sheets_cmd,
 )
 from bot.handlers.donation_handlers import (
     handle_donation_callback,
@@ -198,6 +199,7 @@ async def startup_event():
     application.add_handler(CommandHandler("sheet_info", sheet_info))
     application.add_handler(CommandHandler("clear_expert_duplicates", clear_expert_duplicates_cmd))
     application.add_handler(CommandHandler("clear_user_duplicates", clear_user_duplicates_cmd))
+    application.add_handler(CommandHandler("backup_sheets", backup_sheets_cmd))
 
     # --- פקודות אדמין – חיפוש ורשימות ---
     application.add_handler(CommandHandler("find_user", find_user))
