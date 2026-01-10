@@ -17,6 +17,9 @@ from utils.constants import (
     POSITIONS_SHEET_NAME,
 )
 
+# Expose spreadsheet id at module level so main.py can validate ENV without instantiating client
+SPREADSHEET_ID = GOOGLE_SHEETS_SPREADSHEET_ID
+
 # Retry decorator for transient errors
 def retry(exceptions, tries=3, delay=1.0, backoff=2.0):
     def deco_retry(f):
@@ -37,34 +40,50 @@ def retry(exceptions, tries=3, delay=1.0, backoff=2.0):
 _lock = threading.Lock()
 
 class SheetsService:
+    """
+    SheetsService with lazy initialization of the gspread client.
+    Avoids performing network/auth during module import.
+    """
     def __init__(self):
         self._client = None
         self._spreadsheet = None
-        self.SPREADSHEET_ID = GOOGLE_SHEETS_SPREADSHEET_ID
-        self._init_client()
+        # Use module-level SPREADSHEET_ID (from constants) so main can check it early
+        self.SPREADSHEET_ID = SPREADSHEET_ID
 
     def _init_client(self):
+        """
+        Initialize gspread client lazily. Called by methods that need access.
+        """
+        if self._client and self._spreadsheet:
+            return
+
         creds_json = os.getenv("GOOGLE_CREDENTIALS_JSON", "")
         if not creds_json:
             raise Exception("GOOGLE_CREDENTIALS_JSON not set")
+
         try:
             info = json.loads(creds_json)
         except Exception:
             # maybe it's a path to a file
             with open(creds_json, "r", encoding="utf-8") as fh:
                 info = json.load(fh)
+
         scopes = [
             "https://www.googleapis.com/auth/spreadsheets",
             "https://www.googleapis.com/auth/drive",
         ]
         credentials = Credentials.from_service_account_info(info, scopes=scopes)
         self._client = gspread.authorize(credentials)
+        if not self.SPREADSHEET_ID:
+            raise Exception("GOOGLE_SHEETS_SPREADSHEET_ID not set")
         self._spreadsheet = self._client.open_by_key(self.SPREADSHEET_ID)
 
     # -------------------------
     # Sheet helpers
     # -------------------------
     def _get_sheet(self, name: str):
+        # ensure client initialized
+        self._init_client()
         try:
             return self._spreadsheet.worksheet(name)
         except Exception:
@@ -335,5 +354,5 @@ class SheetsService:
         # Basic validation: ensure headers exist
         self.smart_validate_sheets()
 
-# singleton
+# singleton (safe to instantiate; client will initialize lazily)
 sheets_service = SheetsService()
