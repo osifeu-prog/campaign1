@@ -8,6 +8,8 @@ async def all_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/register – הרשמה\n"
         "/expert – תפריט אקספרט\n"
         "/approve – אישור משתמש (אדמין)\n"
-        "/ALL – רשימת פקודות מלאה\n"
+        "/all – רשימת פקודות מלאה\n"
         "📷 שליחת תמונה – עריכה (מורשים בלבד)"
     )
+
+all_handler = CommandHandler("all", all_cmd)
