@@ -1,8 +1,9 @@
-# main.py – נקודת כניסה משודרגת (מתוקן: webhook path handling + request logging)
+# main.py – נקודת כניסה משודרגת עם בדיקות והרשאות Google מפורטות
 import os
 import sys
 import traceback
 import json
+import time
 
 from fastapi import FastAPI, Request
 from telegram import Update
@@ -42,6 +43,7 @@ from bot.handlers.admin_handlers import (
     handle_experts_pagination,
     handle_supporters_pagination,
     leaderboard_command,
+    backup_sheets_cmd,
 )
 from bot.handlers.donation_handlers import (
     handle_donation_callback,
@@ -49,7 +51,10 @@ from bot.handlers.donation_handlers import (
     handle_copy_wallet_callback,
     handle_ton_info_callback,
 )
-from services import sheets_service
+
+# IMPORTANT: import the sheets_service instance directly from the module
+from services.sheets_service import sheets_service
+
 from utils.constants import (
     CALLBACK_START_SLIDE,
     CALLBACK_START_SOCI,
@@ -57,8 +62,13 @@ from utils.constants import (
     CALLBACK_DONATE,
     CALLBACK_COPY_WALLET,
     CALLBACK_TON_INFO,
+    GOOGLE_SHEETS_SPREADSHEET_ID,
+    GOOGLE_CREDENTIALS_JSON,
 )
 from bot.core.monitoring import monitoring
+
+# image handlers (registered later)
+from bot.handlers import image_handlers
 
 # ===============================
 # ENV
@@ -99,19 +109,79 @@ application = (
 )
 
 # ===============================
-# בדיקת ENV
+# בדיקת ENV + בדיקות הרשאות Google
 # ===============================
 
+def _log_google_auth_issue(exc: Exception):
+    """
+    ניתוח שגיאות כדי לזהות 401/403 ולהדפיס הודעות ברורות בלוג.
+    """
+    msg = str(exc) or ""
+    # חיפוש ישיר בקוד השגיאה או בהודעת השגיאה
+    if "401" in msg or "unauthorized" in msg.lower() or "invalid" in msg.lower():
+        print("❌ Google Auth Error detected: 401 Unauthorized or invalid credentials", file=sys.stderr)
+        print(f"   Details: {msg}", file=sys.stderr)
+        print("   Suggestion: Verify GOOGLE_CREDENTIALS_JSON and that the Service Account has access to the spreadsheet.", file=sys.stderr)
+    elif "403" in msg or "forbidden" in msg.lower() or "access" in msg.lower():
+        print("❌ Google Auth Error detected: 403 Forbidden or insufficient permissions", file=sys.stderr)
+        print(f"   Details: {msg}", file=sys.stderr)
+        print("   Suggestion: Ensure the Service Account is granted Editor access to the spreadsheet and Drive API is enabled.", file=sys.stderr)
+    else:
+        # Generic auth/logging
+        print("❌ Google API error during client initialization:", file=sys.stderr)
+        print(f"   {msg}", file=sys.stderr)
+
 def validate_env():
+    """
+    בדיקת משתני סביבה חיוניים. בנוסף מנסה לאתחל את הלקוח של Google Sheets
+    בצורה מבוקרת כדי לאבחן בעיות הרשאה מוקדם בתהליך ה-startup.
+    """
     required_vars = {
         "TELEGRAM_BOT_TOKEN": TOKEN,
         "WEBHOOK_URL": WEBHOOK_URL,
-        "GOOGLE_SHEETS_SPREADSHEET_ID": sheets_service.SPREADSHEET_ID,
-        "GOOGLE_CREDENTIALS_JSON": os.getenv("GOOGLE_CREDENTIALS_JSON"),
+        "GOOGLE_SHEETS_SPREADSHEET_ID": GOOGLE_SHEETS_SPREADSHEET_ID,
+        "GOOGLE_CREDENTIALS_JSON": GOOGLE_CREDENTIALS_JSON,
     }
     missing = [k for k, v in required_vars.items() if not v]
     if missing:
         raise Exception(f"Missing required ENV variables: {', '.join(missing)}")
+
+    # Try a lightweight initialization of the sheets client to detect auth/permission issues early.
+    try:
+        # sheets_service is an instance; call its init method to force auth attempt and catch errors.
+        # The method name in the service is _init_client (instance method).
+        if hasattr(sheets_service, "_init_client"):
+            sheets_service._init_client()
+        else:
+            # defensive fallback: try to call a public method that triggers lazy init
+            try:
+                sheets_service.smart_validate_sheets()
+            except Exception as inner_exc:
+                _log_google_auth_issue(inner_exc)
+                raise
+
+        # Try a harmless call to confirm access
+        try:
+            sp = getattr(sheets_service, "_spreadsheet", None)
+            if sp and getattr(sp, "_properties", None):
+                title = sp._properties.get("title", "<unknown>")
+                print(f"✔ Google Sheets access verified for spreadsheet: {title}")
+            else:
+                # fallback: try to list worksheets (may raise API errors)
+                try:
+                    _ = sheets_service._spreadsheet.worksheets()
+                    print("✔ Google Sheets access verified (worksheets listed).")
+                except Exception as inner_exc:
+                    _log_google_auth_issue(inner_exc)
+                    raise
+        except Exception as inner_exc:
+            _log_google_auth_issue(inner_exc)
+            raise
+    except Exception as e:
+        # If any exception occurs during client init, analyze and raise a clear error
+        _log_google_auth_issue(e)
+        # Re-raise to let startup fail with clear logs
+        raise
 
 # ===============================
 # Startup – טעינת הבוט
@@ -126,16 +196,19 @@ async def startup_event():
         print("✔ ENV validation passed")
     except Exception as e:
         print(f"❌ ENV validation failed: {e}", file=sys.stderr)
+        # print traceback for deeper debugging
+        traceback.print_exc()
         raise
 
     print("🔍 Running Smart Validation on Google Sheets...")
     try:
+        # smart_validate_sheets will also use the initialized client
         sheets_service.smart_validate_sheets()
         print("✔ Sheets validated successfully")
     except Exception as e:
         print("❌ CRITICAL: Smart Validation failed!", file=sys.stderr)
         traceback.print_exc()
-        print("⚠️ Continuing startup WITHOUT sheet validation.")
+        print("⚠️ Continuing startup WITHOUT sheet validation. Be aware some features may fail at runtime.", file=sys.stderr)
 
     print("🔧 Initializing bot handlers...")
 
@@ -144,23 +217,18 @@ async def startup_event():
     application.add_handler(conv_handler)
 
     # --- Callback handlers בסדר נכון ---
-
-    # 1) אישור/דחיית מומחים (pattern handled inside handler)
     application.add_handler(CallbackQueryHandler(
         expert_admin_callback,
         pattern=r"^expert_(approve|reject):"
     ))
 
-    # 2) תרומות - טיפול בקריאה ל־donate (מדויק)
     application.add_handler(CallbackQueryHandler(
         handle_donation_callback,
         pattern=rf"^{CALLBACK_DONATE}$"
     ))
-    # ספציפיים ל־donation callbacks (copy_wallet, ton_info)
     application.add_handler(CallbackQueryHandler(handle_copy_wallet_callback, pattern=rf"^{CALLBACK_COPY_WALLET}$"))
     application.add_handler(CallbackQueryHandler(handle_ton_info_callback, pattern=rf"^{CALLBACK_TON_INFO}$"))
 
-    # 3) Pagination
     application.add_handler(CallbackQueryHandler(
         handle_experts_pagination,
         pattern=r"^experts_page:"
@@ -170,13 +238,11 @@ async def startup_event():
         pattern=r"^supporters_page:"
     ))
 
-    # 4) קרוסלת /start
     application.add_handler(CallbackQueryHandler(
         bot_handlers.handle_start_callback_entry,
         pattern=rf"^{CALLBACK_START_SLIDE}:|^{CALLBACK_START_SOCI}$|^{CALLBACK_START_FINISH}$"
     ))
 
-    # 5) כל שאר ה־callbacks (menu_flow)
     application.add_handler(CallbackQueryHandler(
         bot_handlers.handle_menu_callback
     ))
@@ -202,6 +268,7 @@ async def startup_event():
     application.add_handler(CommandHandler("sheet_info", sheet_info))
     application.add_handler(CommandHandler("clear_expert_duplicates", clear_expert_duplicates_cmd))
     application.add_handler(CommandHandler("clear_user_duplicates", clear_user_duplicates_cmd))
+    application.add_handler(CommandHandler("backup_sheets", backup_sheets_cmd))
 
     # --- פקודות אדמין – חיפוש ורשימות ---
     application.add_handler(CommandHandler("find_user", find_user))
@@ -227,6 +294,10 @@ async def startup_event():
     # --- פקודות לא מוכרות ---
     application.add_handler(MessageHandler(filters.COMMAND, bot_handlers.unknown_command))
 
+    # --- image handlers (photos / animations) enqueued to JobQueue ---
+    application.add_handler(MessageHandler(filters.PHOTO, image_handlers.handle_photo_message))
+    application.add_handler(MessageHandler(filters.ANIMATION | filters.Document.IMAGE, image_handlers.handle_animation_message))
+
     # --- הפעלת הבוט ---
     await application.initialize()
     await application.start()
@@ -241,10 +312,15 @@ async def startup_event():
         print(f"✔ Webhook set successfully: {final_webhook_url}")
     except Exception as e:
         print(f"❌ Failed to set webhook: {e}", file=sys.stderr)
+        traceback.print_exc()
         raise
 
     # עדכון מטריקות ראשוני
-    monitoring.update_metrics_from_sheets()
+    try:
+        monitoring.update_metrics_from_sheets()
+    except Exception as e:
+        print("⚠ Failed to update monitoring metrics from sheets:", file=sys.stderr)
+        traceback.print_exc()
 
     # הגדרת Cleanup Job (אם JobQueue זמין)
     from datetime import time
