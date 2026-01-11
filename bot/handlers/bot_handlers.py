@@ -47,7 +47,11 @@ from bot.core.session_manager import session_manager
 from services.logger_service import log
 from services.sheets_service import sheets_service
 from services.level_service import level_service
-from utils.constants import ROLE_SUPPORTER
+from utils.constants import (
+    ROLE_SUPPORTER,
+    WHATSAPP_GROUP_LINK,
+    POINTS_FOR_SUPPORTER_REGISTRATION,
+)
 
 
 # ===============================
@@ -81,22 +85,57 @@ async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def all_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    תפריט ALL בסיסי – בשלב זה רק מסביר מה קיים ונותן פקודות שימושיות.
-    אפשר להרחיב אותו בהמשך למקלדת אינטראקטיבית.
+    תפריט ALL בסיסי – מרכז שליטה עם כל הפקודות והאפשרויות
     """
     user = update.effective_user
     await log(context, "ALL command", user=user)
-
-    text = (
-        "📋 מרכז שליטה /ALL\n\n"
-        "פקודות שימושיות:\n"
-        "/menu – תפריט ראשי\n"
-        "/level – הרמה והנקודות שלך\n"
-        "/supporter_panel – פאנל תומך\n"
-        "/expert_panel – פאנל מומחה (אם הגשת מועמדות)\n"
-        "/leaderboard – טבלת מובילים\n"
-        "/positions – רשימת מקומות (admin)\n"
-    )
+    
+    # Update last activity
+    sheets_service.update_user_last_activity(str(user.id))
+    
+    supporter = sheets_service.get_supporter_by_id(str(user.id))
+    expert = sheets_service.get_expert_by_id(str(user.id))
+    
+    lines = ["📋 מרכז שליטה /ALL\n"]
+    
+    if supporter:
+        lines.append("✅ נרשמת כתומך")
+        points = level_service.get_points(user.id, "supporter")
+        level_name = level_service.get_level_name(user.id, "supporter")
+        lines.append(f"🎯 נקודות: {points} | רמה: {level_name}")
+        
+        if WHATSAPP_GROUP_LINK:
+            whatsapp_sent = sheets_service.get_whatsapp_sent_status(str(user.id))
+            if whatsapp_sent:
+                lines.append("📱 קיבלת לינק לקבוצת וואטסאפ")
+            else:
+                lines.append("📱 לחץ /whatsapp לקבלת לינק לקבוצת וואטסאפ")
+    
+    if expert:
+        status = sheets_service.get_expert_status(str(user.id))
+        lines.append(f"🧠 הגשת מועמדות כמומחה | סטטוס: {status}")
+        points_e = level_service.get_points(user.id, "expert")
+        level_name_e = level_service.get_level_name(user.id, "expert")
+        lines.append(f"🎯 נקודות מומחה: {points_e} | רמה: {level_name_e}")
+    
+    if not supporter and not expert:
+        lines.append("👤 עדיין לא נרשמת. השתמש ב-/menu כדי להתחיל.")
+    
+    lines.append("\nפקודות זמינות:")
+    lines.append("/menu - תפריט ראשי")
+    lines.append("/level - הרמה והנקודות שלך")
+    lines.append("/supporter_panel - פאנל תומך")
+    
+    if expert:
+        lines.append("/expert_panel - פאנל מומחה")
+    
+    lines.append("/leaderboard - טבלת מובילים")
+    lines.append("/myid - הצגת user_id")
+    
+    if WHATSAPP_GROUP_LINK:
+        lines.append("/whatsapp - קבלת לינק לקבוצת וואטסאפ")
+    
+    text = "\n".join(lines)
     await update.message.reply_text(text)
 
 
@@ -117,9 +156,51 @@ async def all_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/myid – הצגת user_id\n"
         "/groupid – הצגת group_id (בקבוצה)\n"
         "/positions – רשימת מקומות (admin)\n"
-        "/help – עזרה\n"
     )
+    
+    if WHATSAPP_GROUP_LINK:
+        text += "/whatsapp – קבלת לינק לקבוצת וואטסאפ\n"
+    
+    text += "/help – עזרה\n"
+    
     await update.message.reply_text(text)
+
+
+# ===============================
+# /whatsapp – שליחת לינק לקבוצת וואטסאפ
+# ===============================
+
+async def whatsapp_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    await log(context, "WhatsApp command", user=user)
+    
+    if not WHATSAPP_GROUP_LINK:
+        await update.message.reply_text("לינק קבוצת וואטסאפ לא הוגדר במערכת.")
+        return
+    
+    # בדיקה אם המשתמש רשום כתומך
+    supporter = sheets_service.get_supporter_by_id(str(user.id))
+    if not supporter:
+        await update.message.reply_text(
+            "עליך להירשם קודם כתומך לפני קבלת לינק לקבוצת וואטסאפ.\n"
+            "השתמש ב-/menu ובחר 'תומך' כדי להירשם."
+        )
+        return
+    
+    # שליחת הלינק
+    await update.message.reply_text(
+        f"קבוצת הוואטסאפ של תנועת אחדות:\n\n{WHATSAPP_GROUP_LINK}\n\n"
+        "הצטרפו כדי להיות חלק מהקהילה ולהישאר מעודכנים!"
+    )
+    
+    # סמן שנשלח הלינק
+    sheets_service.mark_whatsapp_sent(str(user.id))
+    
+    # נקודות על קבלת לינק וואטסאפ
+    try:
+        level_service.add_points(user.id, "supporter", 5)
+    except Exception:
+        pass
 
 
 # ===============================
@@ -145,6 +226,9 @@ async def group_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def level_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     await log(context, "Level command", user=user)
+    
+    # Update last activity
+    sheets_service.update_user_last_activity(str(user.id))
 
     # ננסה לבדוק האם קיים כתומך/מומחה
     supporter = sheets_service.get_supporter_by_id(str(user.id))
@@ -201,11 +285,27 @@ async def supporter_panel_command(update: Update, context: ContextTypes.DEFAULT_
         )
         return
 
+    # Update last activity
+    sheets_service.update_user_last_activity(str(user.id))
+    
     points = level_service.get_points(user.id, "supporter")
     level_num = level_service.get_level(user.id, "supporter")
     level_name = level_service.get_level_name(user.id, "supporter")
+    next_info = level_service.get_next_level_info(user.id, "supporter")
 
     personal_link = f"https://t.me/{context.bot.username}?start={user.id}"
+    
+    whatsapp_info = ""
+    if WHATSAPP_GROUP_LINK:
+        whatsapp_sent = sheets_service.get_whatsapp_sent_status(str(user.id))
+        if whatsapp_sent:
+            whatsapp_info = f"\n📱 קבוצת וואטסאפ: {WHATSAPP_GROUP_LINK}"
+        else:
+            whatsapp_info = "\n📱 השתמש ב-/whatsapp לקבלת לינק לקבוצת וואטסאפ"
+
+    next_level_info = ""
+    if next_info:
+        next_level_info = f"\n\n🎯 מטרה: חסרות {next_info['missing_points']} נקודות לרמה {next_info['next_level']}"
 
     text = (
         "📊 פאנל תומך:\n\n"
@@ -213,9 +313,11 @@ async def supporter_panel_command(update: Update, context: ContextTypes.DEFAULT_
         f"עיר: {supporter.get('city', 'לא צויין')}\n"
         f"אימייל: {supporter.get('email', 'לא צויין')}\n\n"
         f"רמה: {level_num} – {level_name}\n"
-        f"נקודות: {points}\n\n"
+        f"נקודות: {points}"
+        f"{next_level_info}\n\n"
         "הקישור האישי שלך לשיתוף:\n"
-        f"{personal_link}\n"
+        f"{personal_link}"
+        f"{whatsapp_info}\n"
     )
 
     await update.message.reply_text(text)
@@ -236,9 +338,13 @@ async def expert_panel_command(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         return
 
+    # Update last activity
+    sheets_service.update_user_last_activity(str(user.id))
+    
     points = level_service.get_points(user.id, "expert")
     level_num = level_service.get_level(user.id, "expert")
     level_name = level_service.get_level_name(user.id, "expert")
+    next_info = level_service.get_next_level_info(user.id, "expert")
 
     status = expert.get("status", "pending")
     position = expert.get("expert_position", "לא נבחר")
@@ -246,6 +352,17 @@ async def expert_panel_command(update: Update, context: ContextTypes.DEFAULT_TYP
     links = expert.get("expert_links", "")
     field = expert.get("expert_field", "")
     exp = expert.get("expert_experience", "")
+    
+    status_texts = {
+        "pending": "⏳ ממתין לאישור",
+        "approved": "✅ מאושר",
+        "rejected": "❌ נדחה"
+    }
+    status_text = status_texts.get(status, status)
+
+    next_level_info = ""
+    if next_info:
+        next_level_info = f"\n\n🎯 מטרה: חסרות {next_info['missing_points']} נקודות לרמה {next_info['next_level']}"
 
     text = (
         "🧠 פאנל מומחה:\n\n"
@@ -253,10 +370,11 @@ async def expert_panel_command(update: Update, context: ContextTypes.DEFAULT_TYP
         f"תחום: {field}\n"
         f"ניסיון: {exp}\n"
         f"מקום: {position}\n"
-        f"סטטוס: {status}\n\n"
+        f"סטטוס: {status_text}\n\n"
         f"רמה: {level_num} – {level_name}\n"
         f"נקודות: {points}\n"
-        f"תומכים: {supporters_count}\n"
+        f"תומכים: {supporters_count}"
+        f"{next_level_info}\n"
     )
 
     if links:
