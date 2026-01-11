@@ -67,6 +67,7 @@ def build_start_keyboard():
 # ===============================
 # Main menu
 # ===============================
+# בתוך build_main_menu_for_user ב-bot/ui/keyboards.py
 
 def build_main_menu_for_user(user_id: int, is_admin: bool):
     rows = [
@@ -76,13 +77,13 @@ def build_main_menu_for_user(user_id: int, is_admin: bool):
         [InlineKeyboardButton("📍 רשימת מקומות", callback_data=CALLBACK_MENU_POSITIONS)],
         [InlineKeyboardButton("💎 תרומה", callback_data=CALLBACK_DONATE)],
         [InlineKeyboardButton("ℹ️ עזרה", callback_data=CALLBACK_HELP_INFO)],
+        
     ]
 
     if is_admin:
         rows.append([InlineKeyboardButton("🛠️ אדמין", callback_data=CALLBACK_MENU_ADMIN)])
 
     return InlineKeyboardMarkup(rows)
-
 
 # ===============================
 # Leaderboard keyboard
