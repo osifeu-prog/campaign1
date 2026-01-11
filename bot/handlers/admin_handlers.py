@@ -395,3 +395,32 @@ __all__ = [
     "leaderboard_command",
     "backup_sheets_cmd",
 ]
+# הוסיפי את זה לסוף admin_handlers.py
+async def quick_stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not _is_admin(user.id):
+        return
+
+    try:
+        # שימוש בפונקציה שהוספנו ל-sheets_service קודם
+        # אם עוד לא הוספת ל-service, נחשב כאן ידנית לבינתיים:
+        users_sheet = sheets_service.get_users_sheet()
+        experts_sheet = sheets_service.get_experts_sheet()
+        
+        all_users = users_sheet.get_all_records()
+        all_experts = experts_sheet.get_all_records()
+        
+        # ספירת סטטוסים
+        approved = sum(1 for r in all_experts if str(r.get("status", "")).lower() == "approved")
+        pending = sum(1 for r in all_experts if str(r.get("status", "")).lower() == "pending")
+        
+        text = (
+            "📊 **סטטיסטיקה מהירה:**\n\n"
+            f"👥 סה\"כ רשומים: {len(all_users)}\n"
+            f"🎓 מומחים מאושרים: {approved}\n"
+            f"⏳ מומחים בהמתנה: {pending}\n"
+            f"🏗️ פוזיציות מאוישות: {sum(1 for p in sheets_service.get_positions() if p.get('expert_user_id'))}"
+        )
+        await update.message.reply_text(text, parse_mode="Markdown")
+    except Exception as e:
+        await update.message.reply_text(f"שגיאה בהפקת סטטיסטיקה: {e}")
