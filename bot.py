@@ -1,4 +1,4 @@
-from webhook import start_webhook
+from webhook import start_app
 
 if __name__ == "__main__":
-    start_webhook()
+    start_app()

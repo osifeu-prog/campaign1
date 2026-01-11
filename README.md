@@ -1,3 +1,3 @@
-# Campaign Bot v2
+# Campaign Bot v3 – Sheets + Images
 
-Ready to deploy on Railway.
+Includes Google Sheets + Image Resize with permissions.
