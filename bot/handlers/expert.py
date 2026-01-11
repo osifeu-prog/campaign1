@@ -9,24 +9,33 @@ async def expert(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not description:
         await update.message.reply_text(
-            "אנא צרף תיאור קצר של תחום מומחיותך."
+            "אנא צרף תיאור קצר של תחום מומחיותך לאחר הפקודה /expert"
         )
         return
+
+    user = update.effective_user
+    username = user.username or ""
 
     analysis = analyze_expert_request(description)
 
     append_row(
         "Experts",
         [
-            update.effective_user.id,
-            update.effective_user.full_name,
+            user.id,
+            user.full_name,
+            username,
             description,
             "pending",
             analysis,
         ],
     )
 
+    append_row(
+        "Logs",
+        [user.id, "expert_request"],
+    )
+
     await update.message.reply_text(
         "בקשתך כמומחה התקבלה.\n"
-        "היא תיבחן על ידי הגורמים המוסמכים."
+        "היא נמצאת כעת בבחינה מקצועית."
     )
