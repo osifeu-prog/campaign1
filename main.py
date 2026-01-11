@@ -21,7 +21,13 @@ tg_app.add_handler(resize_handler)
 
 @app.on_event("startup")
 async def startup():
+    # 🔴 זה החלק שהיה חסר
+    await tg_app.initialize()
     await tg_app.bot.set_webhook(WEBHOOK_URL)
+
+@app.on_event("shutdown")
+async def shutdown():
+    await tg_app.shutdown()
 
 @app.post("/webhook")
 async def webhook(request: Request):
