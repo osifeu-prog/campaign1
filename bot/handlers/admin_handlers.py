@@ -1,8 +1,9 @@
-# bot/handlers/admin_handlers.py
 import os
 import time
 import json
+import traceback
 from typing import Optional, List, Dict, Any
+from datetime import datetime
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
@@ -12,9 +13,50 @@ from services import logger_service
 from utils.constants import ADMIN_IDS, USERS_SHEET_NAME, EXPERTS_SHEET_NAME, POSITIONS_SHEET_NAME, LOG_GROUP_ID
 from bot.core.monitoring import monitoring
 
+# Safe Imports for Google API - Fixes the "No module named googleapiclient" error
+try:
+    from googleapiclient.discovery import build
+    from google.oauth2.service_account import Credentials as GCreds
+    HAS_GOOGLE_API = True
+except ImportError:
+    HAS_GOOGLE_API = False
+
 # Helper: check admin
 def _is_admin(user_id: int) -> bool:
     return str(user_id) in ADMIN_IDS
+
+# -------------------------
+# New: Quick Stats Command
+# -------------------------
+async def quick_stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not _is_admin(user.id):
+        await update.message.reply_text("אין לך הרשאה להריץ פקודה זו.")
+        return
+
+    msg = await update.message.reply_text("⏳ מחשב נתונים בזמן אמת...")
+    try:
+        users_sheet = sheets_service.get_users_sheet()
+        experts_sheet = sheets_service.get_experts_sheet()
+        positions = sheets_service.get_positions()
+        
+        all_users = users_sheet.get_all_records()
+        all_experts = experts_sheet.get_all_records()
+        
+        approved = sum(1 for r in all_experts if str(r.get("status", "")).lower() == "approved")
+        pending = sum(1 for r in all_experts if str(r.get("status", "")).lower() == "pending")
+        assigned_pos = sum(1 for p in positions if p.get('expert_user_id'))
+
+        text = (
+            "📊 **סטטיסטיקה מעודכנת:**\n\n"
+            f"👤 **סה\"כ רשומים:** `{len(all_users)}` משתמשים\n"
+            f"✅ **מומחים מאושרים:** `{approved}`\n"
+            f"⏳ **בהמתנה לאישור:** `{pending}`\n"
+            f"🏗️ **פוזיציות מאוישות:** `{assigned_pos}` מתוך `{len(positions)}`"
+        )
+        await msg.edit_text(text, parse_mode="Markdown")
+    except Exception as e:
+        await msg.edit_text(f"❌ שגיאה בהפקת נתונים: {e}")
 
 # -------------------------
 # Positions commands
@@ -107,7 +149,6 @@ async def sheet_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _is_admin(user.id):
         await update.message.reply_text("אין לך הרשאה.")
         return
-    # show basic info for main sheets
     users = sheets_service.get_users_sheet()
     experts = sheets_service.get_experts_sheet()
     positions = sheets_service.get_positions_sheet()
@@ -212,20 +253,29 @@ async def admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("אין לך הרשאה לפתוח את תפריט האדמין.")
         return
     kb = [
-        [InlineKeyboardButton("מידע על גיליונות", callback_data="admin_sheets_info")],
-        [InlineKeyboardButton("תיקון גיליונות", callback_data="admin_sheets_fix")],
-        [InlineKeyboardButton("שידור לתומכים", callback_data="admin_broadcast_supporters")],
+        [InlineKeyboardButton("📊 סטטיסטיקה מהירה", callback_data="admin_stats_quick")],
+        [InlineKeyboardButton("📂 מידע על גיליונות", callback_data="admin_sheets_info")],
+        [InlineKeyboardButton("🛠️ תיקון גיליונות", callback_data="admin_sheets_fix")],
+        [InlineKeyboardButton("💾 יצירת גיבוי (Drive)", callback_data="admin_run_backup")],
+        [InlineKeyboardButton("📢 שידור לתומכים", callback_data="admin_broadcast_supporters")],
     ]
-    await update.message.reply_text("תפריט אדמין:", reply_markup=InlineKeyboardMarkup(kb))
+    await update.message.reply_text("🛠️ **תפריט מנהל מערכת:**", reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
 
 async def expert_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Handles callback queries for expert approval/rejection.
-    Expected callback_data: expert_approve:<user_id> or expert_reject:<user_id>
-    """
     query = update.callback_query
     await query.answer()
     data = query.data or ""
+    
+    # New Stats Callback
+    if data == "admin_stats_quick":
+        await quick_stats_command(update, context)
+        return
+    
+    # New Backup Callback
+    if data == "admin_run_backup":
+        await backup_sheets_cmd(update, context)
+        return
+
     if data.startswith("expert_approve:"):
         uid = data.split(":", 1)[1]
         ok = sheets_service.update_expert_status(uid, "approved")
@@ -308,7 +358,6 @@ async def export_metrics_command(update: Update, context: ContextTypes.DEFAULT_T
 async def handle_experts_pagination(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    # simple placeholder: show top 10
     rows = sheets_service.get_experts_leaderboard()
     text = "Leaderboard (top 10):\n"
     for r in rows[:10]:
@@ -331,15 +380,20 @@ async def leaderboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.message.reply_text(text)
 
 # -------------------------
-# Backup sheets (admin)
+# Backup sheets (Drive API)
 # -------------------------
 async def backup_sheets_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if not _is_admin(user.id):
-        await update.message.reply_text("אין לך הרשאה להריץ גיבוי.")
+        await update.message.reply_text("אין לך הרשאה.")
         return
+        
+    if not HAS_GOOGLE_API:
+        await update.message.reply_text("❌ שגיאה: ספריות Google API לא הותקנו. וודא שעדכנת את requirements.txt.")
+        return
+
+    status_msg = await update.message.reply_text("🔄 מתחיל יצירת גיבוי ב-Google Drive...")
     try:
-        # load credentials info
         creds_json = os.getenv("GOOGLE_CREDENTIALS_JSON", "")
         try:
             info = json.loads(creds_json)
@@ -347,25 +401,26 @@ async def backup_sheets_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             with open(creds_json, "r", encoding="utf-8") as fh:
                 info = json.load(fh)
 
-        from googleapiclient.discovery import build
-        from google.oauth2.service_account import Credentials as GCreds
-
         scopes = ["https://www.googleapis.com/auth/drive"]
         credentials = GCreds.from_service_account_info(info, scopes=scopes)
         drive_service = build("drive", "v3", credentials=credentials)
 
         spreadsheet_id = sheets_service.SPREADSHEET_ID
-        body = {"name": f"backup_{spreadsheet_id}_{int(time.time())}"}
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
+        body = {"name": f"Backup_Campaign1_{timestamp}"}
+        
         copied = drive_service.files().copy(fileId=spreadsheet_id, body=body).execute()
         copy_id = copied.get("id")
-        # create share link (viewer) - optional
-        drive_service.permissions().create(fileId=copy_id, body={"type":"anyone","role":"reader"}).execute()
+        
+        # Security: The backup file is now private to the Service Account.
         link = f"https://docs.google.com/spreadsheets/d/{copy_id}"
-        await update.message.reply_text(f"גיבוי נוצר בהצלחה: {link}")
+        await status_msg.edit_text(f"✅ גיבוי נוצר בהצלחה ב-Drive!\nID: `{copy_id}`\nלינק: {link}", parse_mode="Markdown")
+        
     except Exception as e:
-        await update.message.reply_text(f"שגיאה ביצירת גיבוי: {e}")
+        traceback.print_exc()
+        await status_msg.edit_text(f"❌ שגיאה ביצירת גיבוי: {e}")
 
-# Export list for imports
+# Export list
 __all__ = [
     "list_positions",
     "position_details",
@@ -394,33 +449,5 @@ __all__ = [
     "handle_supporters_pagination",
     "leaderboard_command",
     "backup_sheets_cmd",
+    "quick_stats_command", # Added
 ]
-# הוסיפי את זה לסוף admin_handlers.py
-async def quick_stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    if not _is_admin(user.id):
-        return
-
-    try:
-        # שימוש בפונקציה שהוספנו ל-sheets_service קודם
-        # אם עוד לא הוספת ל-service, נחשב כאן ידנית לבינתיים:
-        users_sheet = sheets_service.get_users_sheet()
-        experts_sheet = sheets_service.get_experts_sheet()
-        
-        all_users = users_sheet.get_all_records()
-        all_experts = experts_sheet.get_all_records()
-        
-        # ספירת סטטוסים
-        approved = sum(1 for r in all_experts if str(r.get("status", "")).lower() == "approved")
-        pending = sum(1 for r in all_experts if str(r.get("status", "")).lower() == "pending")
-        
-        text = (
-            "📊 **סטטיסטיקה מהירה:**\n\n"
-            f"👥 סה\"כ רשומים: {len(all_users)}\n"
-            f"🎓 מומחים מאושרים: {approved}\n"
-            f"⏳ מומחים בהמתנה: {pending}\n"
-            f"🏗️ פוזיציות מאוישות: {sum(1 for p in sheets_service.get_positions() if p.get('expert_user_id'))}"
-        )
-        await update.message.reply_text(text, parse_mode="Markdown")
-    except Exception as e:
-        await update.message.reply_text(f"שגיאה בהפקת סטטיסטיקה: {e}")
