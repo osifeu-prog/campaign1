@@ -297,7 +297,10 @@ async def startup_event():
     # --- image handlers (photos / animations) enqueued to JobQueue ---
     application.add_handler(MessageHandler(filters.PHOTO, image_handlers.handle_photo_message))
     application.add_handler(MessageHandler(filters.ANIMATION | filters.Document.IMAGE, image_handlers.handle_animation_message))
-
+    # --- פקודות אדמין – Monitoring ---
+    application.add_handler(CommandHandler("dashboard", dashboard_command))
+    application.add_handler(CommandHandler("stats", quick_stats_command)) # שורה חדשה להדבקה
+    application.add_handler(CommandHandler("hourly_stats", hourly_stats_command))
     # --- הפעלת הבוט ---
     await application.initialize()
     await application.start()
@@ -429,3 +432,4 @@ async def root():
         "status": "running",
         "bot": application.bot.username if application.bot else None,
     }
+
