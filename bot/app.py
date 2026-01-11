@@ -1,4 +1,3 @@
-
 from telegram.ext import Application
 from config.settings import TELEGRAM_BOT_TOKEN
 
