@@ -246,7 +246,7 @@ async def startup_event():
     application.add_handler(CallbackQueryHandler(
         bot_handlers.handle_menu_callback
     ))
-
+    application.add_handler(CommandHandler("admin", admin_menu))
     # --- פקודות כלליות ---
     application.add_handler(CommandHandler("start", bot_handlers.start))
     application.add_handler(CommandHandler("menu", bot_handlers.menu_command))
@@ -432,4 +432,5 @@ async def root():
         "status": "running",
         "bot": application.bot.username if application.bot else None,
     }
+
 
