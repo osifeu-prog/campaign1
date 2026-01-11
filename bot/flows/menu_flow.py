@@ -28,6 +28,7 @@ from utils.constants import (
     CALLBACK_LEADERBOARD,
     CALLBACK_DONATE,
     CALLBACK_HELP_INFO,
+    WHATSAPP_GROUP_LINK,
 )
 
 
@@ -42,6 +43,8 @@ def is_admin(user_id: int) -> bool:
 async def handle_menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     await log(context, "Menu command", user=user)
+    # Update last activity
+    sheets_service.update_user_last_activity(str(user.id))
     keyboard = build_main_menu_for_user(user.id, is_admin(user.id))
     await update.message.reply_text("📋 תפריט ראשי", reply_markup=keyboard)
 
@@ -60,6 +63,9 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     bot_username = context.bot.username
 
     session_manager.get_or_create(user)
+    
+    # Update last activity
+    sheets_service.update_user_last_activity(str(user.id))
 
     # תפריט ראשי
     if data == CALLBACK_MENU_MAIN:
@@ -83,13 +89,29 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
                 f"אימייל: {supporter.get('email', 'לא צויין')}\n\n"
                 "הקישור האישי שלך לשיתוף:\n"
                 f"{personal_link}\n\n"
-                "מה תרצה לעשות עכשיו?"
             )
-            keyboard = InlineKeyboardMarkup([
+            
+            # הוסף לינק וואטסאפ אם קיים
+            if WHATSAPP_GROUP_LINK:
+                whatsapp_sent = sheets_service.get_whatsapp_sent_status(str(user.id))
+                if whatsapp_sent:
+                    text += f"📱 קבוצת וואטסאפ: {WHATSAPP_GROUP_LINK}\n\n"
+                else:
+                    text += "📱 לחץ /whatsapp לקבלת לינק לקבוצת וואטסאפ\n\n"
+            
+            text += "מה תרצה לעשות עכשיו?"
+            
+            keyboard_buttons = [
                 [InlineKeyboardButton("📣 לשתף את הקישור האישי", url=personal_link)],
                 [InlineKeyboardButton("🧠 להגיש מועמדות כמומחה", callback_data=CALLBACK_APPLY_EXPERT)],
-                [InlineKeyboardButton("📋 תפריט ראשי", callback_data=CALLBACK_MENU_MAIN)],
-            ])
+            ]
+            
+            if WHATSAPP_GROUP_LINK and not whatsapp_sent:
+                keyboard_buttons.insert(1, [InlineKeyboardButton("📱 קבלת לינק וואטסאפ", callback_data="get_whatsapp")])
+            
+            keyboard_buttons.append([InlineKeyboardButton("📋 תפריט ראשי", callback_data=CALLBACK_MENU_MAIN)])
+            
+            keyboard = InlineKeyboardMarkup(keyboard_buttons)
         else:
             text = (
                 "עדיין לא נרשמת כתומך.\n\n"
@@ -108,6 +130,27 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     # מומחה
     if data == CALLBACK_MENU_EXPERT:
         await log(context, "Open expert menu", user=user)
+        
+        # בדיקה אם המשתמש רשום כתומך לפני הרשמה כמומחה
+        supporter = sheets_service.get_supporter_by_id(str(user.id))
+        if not supporter:
+            text = (
+                "❌ לפני הגשת מועמדות כמומחה, עליך להירשם קודם כתומך.\n\n"
+                "הרשמה כתומך מאפשרת לך:\n"
+                "• להיות חלק מהקהילה\n"
+                "• לקבל עדכונים שוטפים\n"
+                "• לקבל לינק לקבוצת הוואטסאפ\n"
+                "• לצבור נקודות ולהתקדם ברמות\n\n"
+                "לחץ על הכפתור למטה כדי להירשם כתומך:"
+            )
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🧑‍🎓 הירשם כתומך קודם", callback_data=CALLBACK_APPLY_SUPPORTER)],
+                [InlineKeyboardButton("📋 תפריט ראשי", callback_data=CALLBACK_MENU_MAIN)],
+            ])
+            await query.message.reply_text(text, reply_markup=keyboard)
+            await telemetry.track_event(context, "menu_expert_open_not_registered", user=user)
+            return ConversationHandler.END
+        
         status = sheets_service.get_expert_status(str(user.id))
         position = sheets_service.get_expert_position(str(user.id))
         group_link = sheets_service.get_expert_group_link(str(user.id))
@@ -116,9 +159,14 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
         if status is None:
             text = (
-                "עדיין לא הגשת מועמדות כמומחה.\n\n"
-                "כדי להגיש מועמדות:\n"
-                "לחץ על הכפתור למטה ונרוץ יחד על התהליך."
+                "אתה רשום כתומך ✅\n\n"
+                "כעת אתה יכול להגיש מועמדות כמומחה.\n\n"
+                "מה זה אומר?\n"
+                "• תוכל לקבל מקום קבוע בתנועה\n"
+                "• תוכל לצבור תומכים אישיים\n"
+                "• תופיע בטבלת המובילים\n"
+                "• תקבל גישה לחומרי העשרה\n\n"
+                "לחץ על הכפתור למטה כדי להתחיל בתהליך:"
             )
             keyboard = InlineKeyboardMarkup([
                 [InlineKeyboardButton("🧠 הגשת מועמדות כמומחה", callback_data=CALLBACK_APPLY_EXPERT)],
@@ -129,9 +177,9 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             return ConversationHandler.END
 
         status_text_map = {
-            "pending": "ממתין לאישור",
-            "approved": "מאושר",
-            "rejected": "נדחה",
+            "pending": "⏳ ממתין לאישור",
+            "approved": "✅ מאושר",
+            "rejected": "❌ נדחה",
         }
         status_text = status_text_map.get(status, status or "לא ידוע")
         pos_text = position or "לא נבחר"
@@ -144,7 +192,7 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
         if status == "approved":
             text += (
-                "המועמדות שלך אושרה.\n\n"
+                "המועמדות שלך אושרה! 🎉\n\n"
                 "קישור הבוט האישי שלך לשיתוף (מומחה):\n"
                 f"{referral_link}\n\n"
             )
@@ -157,7 +205,7 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
                     "/set_expert_group <user_id> <link>\n\n"
                 )
         elif status == "pending":
-            text += "המועמדות שלך ממתינה לאישור אדמין.\n\n"
+            text += "המועמדות שלך ממתינה לאישור אדמין.\nתקבל הודעה כשתאושר.\n\n"
         elif status == "rejected":
             text += (
                 "המועמדות שלך נדחתה.\n"
@@ -166,14 +214,40 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
         text += "מה תרצה לעשות עכשיו?"
 
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📣 לשתף את קישור המומחה", url=referral_link)],
-            [InlineKeyboardButton("🧠 הגשת מועמדות מחדש", callback_data=CALLBACK_APPLY_EXPERT)],
-            [InlineKeyboardButton("📋 תפריט ראשי", callback_data=CALLBACK_MENU_MAIN)],
-        ])
+        keyboard_buttons = []
+        if status == "approved":
+            keyboard_buttons.append([InlineKeyboardButton("📣 לשתף את קישור המומחה", url=referral_link)])
+        
+        keyboard_buttons.append([InlineKeyboardButton("🧠 הגשת מועמדות מחדש", callback_data=CALLBACK_APPLY_EXPERT)])
+        keyboard_buttons.append([InlineKeyboardButton("📋 תפריט ראשי", callback_data=CALLBACK_MENU_MAIN)])
+
+        keyboard = InlineKeyboardMarkup(keyboard_buttons)
 
         await query.message.reply_text(text, reply_markup=keyboard)
         await telemetry.track_event(context, "menu_expert_open", user=user, properties={"status": status})
+        return ConversationHandler.END
+
+    # קבלת לינק וואטסאפ
+    if data == "get_whatsapp":
+        if not WHATSAPP_GROUP_LINK:
+            await query.message.reply_text("לינק קבוצת וואטסאפ לא זמין כרגע.")
+            return ConversationHandler.END
+        
+        await query.message.reply_text(
+            f"קבוצת הוואטסאפ של תנועת אחדות:\n\n{WHATSAPP_GROUP_LINK}\n\n"
+            "הצטרפו כדי להיות חלק מהקהילה ולהישאר מעודכנים!"
+        )
+        
+        # סמן שנשלח הלינק
+        sheets_service.mark_whatsapp_sent(str(user.id))
+        
+        # נקודות על קבלת לינק וואטסאפ
+        from services.level_service import level_service
+        try:
+            level_service.add_points(user.id, "supporter", 5)
+        except Exception:
+            pass
+        
         return ConversationHandler.END
 
     # אדמין
@@ -202,6 +276,16 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     # הרשמת מומחה
     if data == CALLBACK_APPLY_EXPERT:
         await log(context, "User chose apply expert from menu", user=user)
+        
+        # בדיקה אם רשום כתומך
+        supporter = sheets_service.get_supporter_by_id(str(user.id))
+        if not supporter:
+            await query.message.reply_text(
+                "❌ לפני הגשת מועמדות כמומחה, עליך להירשם קודם כתומך.\n\n"
+                "השתמש בתפריט ובחר 'תומך' כדי להירשם קודם."
+            )
+            return ConversationHandler.END
+        
         await telemetry.track_event(context, "apply_expert_clicked", user=user)
         await query.message.reply_text("מתחילים בהגשת מועמדות כמומחה. מה שמך המלא?")
         return EXPERT_NAME
