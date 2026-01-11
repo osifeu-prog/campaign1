@@ -2,6 +2,5 @@ python-telegram-bot==20.7
 Pillow
 gspread
 oauth2client
-
-fastapi
-uvicorn
+fastapi==0.110.0
+uvicorn==0.27.1
