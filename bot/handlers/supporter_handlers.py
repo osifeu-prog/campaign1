@@ -16,12 +16,16 @@ from bot.states import (
     SUPPORTER_PHONE,
     SUPPORTER_FEEDBACK,
 )
-from utils.constants import ROLE_SUPPORTER, CALLBACK_MENU_MAIN, CALLBACK_APPLY_EXPERT
+from utils.constants import (
+    ROLE_SUPPORTER, 
+    CALLBACK_MENU_MAIN, 
+    CALLBACK_APPLY_EXPERT,
+    WHATSAPP_GROUP_LINK,
+    POINTS_FOR_SUPPORTER_REGISTRATION
+)
 from services import sheets_service
 from services.logger_service import log
-
-EMAIL_REGEX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-PHONE_REGEX = re.compile(r"^[0-9+\-\s]{7,20}$")
+from services.level_service import level_service
 
 
 def build_personal_link(bot_username: str, user_id: int) -> str:
@@ -56,7 +60,7 @@ async def supporter_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
 
     if text.lower() not in ["דלג", "skip", ""]:
-        if not EMAIL_REGEX.match(text):
+        if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", text):
             await update.message.reply_text(
                 "האימייל לא נראה תקין. דוגמה: name@example.com או כתוב 'דלג'."
             )
@@ -79,7 +83,7 @@ async def supporter_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
 
     if text.lower() not in ["דלג", "skip", ""]:
-        if not PHONE_REGEX.match(text):
+        if not re.match(r"^[0-9+\-\s]{7,20}$", text):
             await update.message.reply_text(
                 "מספר הטלפון לא נראה תקין. דוגמה: 0501234567 או כתוב 'דלג'."
             )
@@ -125,25 +129,58 @@ async def supporter_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "created_at": context.user_data.get("created_at"),
         "feedback": context.user_data.get("supporter_feedback", ""),
         "phone": context.user_data.get("supporter_phone", ""),
+        "whatsapp_link_sent": "FALSE",  # יסומן TRUE כשנשלח
+        "points": POINTS_FOR_SUPPORTER_REGISTRATION,  # נקודות על רישום
+        "level": 1,  # רמה התחלתית
+        "last_activity": datetime.utcnow().isoformat(),
     }
 
     sheets_service.append_user(user_row)
     await log(context, "Supporter registered", user=update.effective_user, extra=user_row)
 
+    # הוספת נקודות דרך level_service
+    try:
+        level_service.add_points(update.effective_user.id, "supporter", POINTS_FOR_SUPPORTER_REGISTRATION)
+    except Exception as e:
+        print(f"Error adding points: {e}")
+
     personal_link = build_personal_link(context.bot.username, context.user_data["user_id"])
 
     text = (
-        "תודה שנרשמת כתומך!\n\n"
-        "זהו הקישור האישי שלך לשיתוף. כל מי שיצטרף דרכך יופיע אצלך כדאטה בגיליון:\n"
-        f"{personal_link}\n\n"
-        "מה תרצה לעשות עכשיו?"
+        "🎉 תודה שנרשמת כתומך!\n\n"
+        "**מה קיבלת עכשיו?**\n"
+        f"• {POINTS_FOR_SUPPORTER_REGISTRATION} נקודות התחלתיות\n"
+        "• רמת 'משתמש חדש'\n"
+        "• גישה לכל התכנים והעדכונים\n\n"
+        "**הקישור האישי שלך לשיתוף:**\n"
+        f"{personal_link}\n"
+        "כל מי שיצטרף דרכך יופיע אצלך כדאטה בגיליון ויעזור לך להתקדם ברמות!\n\n"
     )
 
-    keyboard = InlineKeyboardMarkup([
+    # הוספת לינק וואטסאפ אם קיים
+    whatsapp_section = ""
+    keyboard_buttons = []
+    
+    if WHATSAPP_GROUP_LINK:
+        whatsapp_section = (
+            f"\n**קבוצת הוואטסאפ שלנו:**\n"
+            f"{WHATSAPP_GROUP_LINK}\n"
+            "הצטרפו כדי להיות חלק מהקהילה ולהישאר מעודכנים!\n\n"
+        )
+        # סמן שנשלח הלינק
+        sheets_service.mark_whatsapp_sent(str(update.effective_user.id))
+        keyboard_buttons.append([InlineKeyboardButton("📱 הצטרפות לקבוצת וואטסאפ", url=WHATSAPP_GROUP_LINK)])
+    
+    text += whatsapp_section
+    text += "מה תרצה לעשות עכשיו?"
+
+    keyboard_buttons.extend([
         [InlineKeyboardButton("📣 לשתף את הקישור האישי שלי", url=personal_link)],
         [InlineKeyboardButton("🧠 להגיש מועמדות כמומחה", callback_data=CALLBACK_APPLY_EXPERT)],
         [InlineKeyboardButton("📋 פתיחת תפריט ראשי", callback_data=CALLBACK_MENU_MAIN)],
     ])
+
+    keyboard = InlineKeyboardMarkup(keyboard_buttons)
 
     await update.message.reply_text(text, reply_markup=keyboard)
     return ConversationHandler.END
