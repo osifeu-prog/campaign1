@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Request
+from telegram import Update
 from telegram.ext import CommandHandler
 
 from bot.app import build_application
@@ -22,19 +23,19 @@ tg_app.add_handler(CommandHandler("admin", admin_menu))
 
 @app.on_event("startup")
 async def on_startup():
-    logger.info("Initializing Telegram application")
+    logger.info("Starting Telegram bot (webhook mode)")
     await tg_app.initialize()
     await tg_app.bot.set_webhook(WEBHOOK_URL)
 
 
 @app.post("/webhook")
 async def telegram_webhook(request: Request):
-    update = await request.json()
-    await tg_app.update_queue.put(update)
+    data = await request.json()
+    update = Update.de_json(data, tg_app.bot)
+    await tg_app.process_update(update)
     return {"ok": True}
 
 
 if name == "main":
     import uvicorn
-
     uvicorn.run(app, host="0.0.0.0", port=PORT)
