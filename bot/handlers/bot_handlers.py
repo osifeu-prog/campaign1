@@ -104,3 +104,48 @@ def get_conversation_handler() -> ConversationHandler:
         ],
         allow_reentry=True,
     )
+
+import io
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, MessageHandler, filters
+from core.image_service import ImageService # השירות שיצרנו קודם
+from db_service import DBService
+
+db = DBService()
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    # רישום ראשוני ב-DB
+    db.add_user({
+        "id": user.id,
+        "username": user.username,
+        "full_name": user.first_name,
+        "role": "supporter"
+    })
+    await update.message.reply_text("ברוך הבא לתנועת אחדות! שלח לי תמונה לעריכה או השתמש בתפריט.")
+
+async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """קולט תמונה, משנה גודל ושולח חזרה"""
+    photo_file = await update.message.photo[-1].get_file()
+    image_bytes = await photo_file.download_as_bytearray()
+    
+    # עיבוד התמונה ל-640x360
+    processed_image = ImageService.resize_image(bytes(image_bytes), (640, 360))
+    
+    await update.message.reply_photo(
+        photo=processed_image,
+        caption="הנה התמונה שלך מותאמת ל-640x360 פיקסלים ✅"
+    )
+
+def get_main_conv_handler():
+    return ConversationHandler(
+        entry_points=[CommandHandler('start', start)],
+        states={
+            # כאן יבואו הסטייטים של הרישום שלך...
+        },
+        fallbacks=[],
+        per_message=True # תיקון לאזהרה מהלוגים
+    )
+
+# האנדלר החדש לתמונות
+image_handler = MessageHandler(filters.PHOTO, handle_image)
