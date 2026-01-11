@@ -1,6 +1,4 @@
 # utils/constants.py
-# קובץ קבועים מרכזי לפרויקט Campaign1
-
 import os
 import sys
 from typing import List
@@ -32,6 +30,12 @@ SUPPORT_GROUP_ID = os.getenv("SUPPORT_GROUP_ID", "")
 EXPERTS_GROUP_ID = os.getenv("EXPERTS_GROUP_ID", "")
 ACTIVISTS_GROUP_ID = os.getenv("ACTIVISTS_GROUP_ID", "")
 ALL_MEMBERS_GROUP_ID = os.getenv("ALL_MEMBERS_GROUP_ID", "")
+
+# ===============================
+# WhatsApp Group
+# ===============================
+
+WHATSAPP_GROUP_LINK = os.getenv("WHATSAPP_GROUP_LINK", "")
 
 # ===============================
 # ADMIN_IDS - ולידציה
@@ -94,6 +98,17 @@ except Exception:
 DEFAULT_TIMEZONE = os.getenv("DEFAULT_TIMEZONE", "UTC")
 
 # ===============================
+# נקודות ופעולות
+# ===============================
+
+POINTS_FOR_SUPPORTER_REGISTRATION = 10
+POINTS_FOR_EXPERT_APPLICATION = 15
+POINTS_FOR_EXPERT_APPROVAL = 25
+POINTS_FOR_SUPPORTING_EXPERT = 2
+POINTS_FOR_REFERRAL = 5
+POINTS_FOR_DAILY_ACTIVITY = 1
+
+# ===============================
 # Callback Data keys
 # ===============================
 
@@ -132,6 +147,7 @@ CALLBACK_TON_INFO = "ton_info"
 # Leaderboard / Expert profile
 CALLBACK_LEADERBOARD = "leaderboard"
 CALLBACK_EXPERT_PROFILE = "expert_profile"  # prefix: expert_profile:<user_id>
+CALLBACK_SUPPORT_EXPERT = "support_expert"  # prefix: support_expert:<user_id>
 
 # Help
 CALLBACK_HELP_INFO = "help_info"
@@ -143,6 +159,11 @@ CALLBACK_SUPPORTERS_PAGE = "supporters_page"
 # Expert admin actions
 CALLBACK_EXPERT_APPROVE = "expert_approve"
 CALLBACK_EXPERT_REJECT = "expert_reject"
+
+# User profile
+CALLBACK_MY_PROFILE = "my_profile"
+CALLBACK_MY_STATS = "my_stats"
+CALLBACK_MY_REFERRALS = "my_referrals"
 
 # ===============================
 # Media settings
@@ -180,6 +201,7 @@ __all__ = [
     "EXPERTS_GROUP_ID",
     "ACTIVISTS_GROUP_ID",
     "ALL_MEMBERS_GROUP_ID",
+    "WHATSAPP_GROUP_LINK",
     "ADMIN_IDS",
     "TON_WALLET_ADDRESS",
     "MIN_DONATION_AMOUNT",
@@ -189,6 +211,12 @@ __all__ = [
     "ROLE_ACTIVIST",
     "MAX_POSITIONS",
     "DEFAULT_TIMEZONE",
+    "POINTS_FOR_SUPPORTER_REGISTRATION",
+    "POINTS_FOR_EXPERT_APPLICATION",
+    "POINTS_FOR_EXPERT_APPROVAL",
+    "POINTS_FOR_SUPPORTING_EXPERT",
+    "POINTS_FOR_REFERRAL",
+    "POINTS_FOR_DAILY_ACTIVITY",
     "CALLBACK_START_SLIDE",
     "CALLBACK_START_SOCI",
     "CALLBACK_START_FINISH",
@@ -213,11 +241,15 @@ __all__ = [
     "CALLBACK_TON_INFO",
     "CALLBACK_LEADERBOARD",
     "CALLBACK_EXPERT_PROFILE",
+    "CALLBACK_SUPPORT_EXPERT",
     "CALLBACK_HELP_INFO",
     "CALLBACK_EXPERTS_PAGE",
     "CALLBACK_SUPPORTERS_PAGE",
     "CALLBACK_EXPERT_APPROVE",
     "CALLBACK_EXPERT_REJECT",
+    "CALLBACK_MY_PROFILE",
+    "CALLBACK_MY_STATS",
+    "CALLBACK_MY_REFERRALS",
     "DEFAULT_PAGE_SIZE",
     "IMAGE_SIZES",
     "TEMP_MEDIA_DIR",
