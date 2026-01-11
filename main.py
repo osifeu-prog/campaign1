@@ -21,7 +21,6 @@ tg_app.add_handler(resize_handler)
 
 @app.on_event("startup")
 async def startup():
-    # 🔴 זה החלק שהיה חסר
     await tg_app.initialize()
     await tg_app.bot.set_webhook(WEBHOOK_URL)
 
