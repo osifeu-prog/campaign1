@@ -129,6 +129,13 @@ class SheetsService:
             "referrer",
             "joined_via_expert_id",
             "created_at",
+            "whatsapp_link_sent",
+            "points",
+            "level",
+            "verified",
+            "referrals_count",
+            "last_activity",
+            "feedback",
         ]
         experts_headers = [
             "user_id",
@@ -142,6 +149,10 @@ class SheetsService:
             "status",
             "group_link",
             "supporters_count",
+            "points",
+            "level",
+            "verified",
+            "referrals_count",
         ]
         positions_headers = [
             "position_id",
@@ -194,6 +205,7 @@ class SheetsService:
         if not sheet:
             raise Exception("Users sheet not available")
         headers = sheet.row_values(1)
+        # Ensure all fields exist
         row = [user_record.get(h, "") for h in headers]
         with _lock:
             sheet.append_row(row)
@@ -228,6 +240,52 @@ class SheetsService:
                 return True
         return False
 
+    @retry(Exception, tries=3, delay=0.5)
+    def mark_whatsapp_sent(self, user_id: str):
+        """Mark that WhatsApp link was sent to user"""
+        sheet = self.get_users_sheet()
+        if not sheet:
+            return False
+        records = sheet.get_all_records()
+        headers = sheet.row_values(1)
+        
+        # Ensure whatsapp_link_sent column exists
+        if "whatsapp_link_sent" not in headers:
+            headers.append("whatsapp_link_sent")
+            sheet.update("1:1", [headers])
+            
+        col_idx = headers.index("whatsapp_link_sent") + 1
+        
+        for idx, r in enumerate(records, start=2):
+            if str(r.get("user_id")) == str(user_id):
+                with _lock:
+                    sheet.update_cell(idx, col_idx, "TRUE")
+                return True
+        return False
+
+    @retry(Exception, tries=3, delay=0.5)
+    def update_user_last_activity(self, user_id: str):
+        """Update last activity timestamp for user"""
+        sheet = self.get_users_sheet()
+        if not sheet:
+            return False
+        records = sheet.get_all_records()
+        headers = sheet.row_values(1)
+        
+        # Ensure last_activity column exists
+        if "last_activity" not in headers:
+            headers.append("last_activity")
+            sheet.update("1:1", [headers])
+            
+        col_idx = headers.index("last_activity") + 1
+        
+        for idx, r in enumerate(records, start=2):
+            if str(r.get("user_id")) == str(user_id):
+                with _lock:
+                    sheet.update_cell(idx, col_idx, datetime.utcnow().isoformat())
+                return True
+        return False
+
     # ========== Queries ==========
 
     def get_expert_by_id(self, user_id: str) -> Optional[Dict[str, Any]]:
@@ -249,6 +307,17 @@ class SheetsService:
             if str(r.get("user_id")) == str(user_id):
                 return r
         return None
+
+    def is_user_registered(self, user_id: str) -> bool:
+        """Check if user is registered as supporter"""
+        return self.get_supporter_by_id(user_id) is not None
+
+    def get_whatsapp_sent_status(self, user_id: str) -> bool:
+        """Check if WhatsApp link was sent to user"""
+        user = self.get_supporter_by_id(user_id)
+        if not user:
+            return False
+        return str(user.get("whatsapp_link_sent", "")).upper() == "TRUE"
 
     @retry(Exception, tries=3, delay=0.5)
     def get_positions(self) -> List[Dict[str, Any]]:
@@ -499,6 +568,18 @@ def auto_fix_all_sheets():
 def validate_all_sheets():
     return sheets_service.validate_all_sheets()
 
+def is_user_registered(user_id: str) -> bool:
+    return sheets_service.is_user_registered(user_id)
+
+def mark_whatsapp_sent(user_id: str):
+    return sheets_service.mark_whatsapp_sent(user_id)
+
+def get_whatsapp_sent_status(user_id: str) -> bool:
+    return sheets_service.get_whatsapp_sent_status(user_id)
+
+def update_user_last_activity(user_id: str):
+    return sheets_service.update_user_last_activity(user_id)
+
 
 __all__ = [
     "SPREADSHEET_ID",
@@ -521,4 +602,8 @@ __all__ = [
     "auto_fix_all_sheets",
     "validate_all_sheets",
     "smart_validate_sheets",
+    "is_user_registered",
+    "mark_whatsapp_sent",
+    "get_whatsapp_sent_status",
+    "update_user_last_activity",
 ]
