@@ -1,4 +1,5 @@
 # utils/constants.py
+# קובץ קבועים מרכזי לפרויקט Campaign1
 import os
 import sys
 from typing import List
@@ -6,7 +7,6 @@ from typing import List
 # ===============================
 # ENV בסיסיים
 # ===============================
-
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "")
 
@@ -14,17 +14,15 @@ GOOGLE_SHEETS_SPREADSHEET_ID = os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID", "")
 GOOGLE_CREDENTIALS_JSON = os.getenv("GOOGLE_CREDENTIALS_JSON", "")
 
 # ===============================
-# Google Sheets - שמות גיליונות
+# Google Sheets - שמות גיליונות (ברירת מחדל)
 # ===============================
-
-USERS_SHEET_NAME = os.getenv("USERS_SHEET_NAME", "Telegram Leads")
+USERS_SHEET_NAME = os.getenv("USERS_SHEET_NAME", "Users")
 EXPERTS_SHEET_NAME = os.getenv("EXPERTS_SHEET_NAME", "Experts")
 POSITIONS_SHEET_NAME = os.getenv("POSITIONS_SHEET_NAME", "Positions")
 
 # ===============================
 # Telegram Groups / IDs
 # ===============================
-
 LOG_GROUP_ID = os.getenv("LOG_GROUP_ID", "")
 SUPPORT_GROUP_ID = os.getenv("SUPPORT_GROUP_ID", "")
 EXPERTS_GROUP_ID = os.getenv("EXPERTS_GROUP_ID", "")
@@ -32,39 +30,26 @@ ACTIVISTS_GROUP_ID = os.getenv("ACTIVISTS_GROUP_ID", "")
 ALL_MEMBERS_GROUP_ID = os.getenv("ALL_MEMBERS_GROUP_ID", "")
 
 # ===============================
-# WhatsApp Group
-# ===============================
-
-WHATSAPP_GROUP_LINK = os.getenv("WHATSAPP_GROUP_LINK", "")
-
-# ===============================
 # ADMIN_IDS - ולידציה
 # ===============================
-
 def _parse_admin_ids(raw: str) -> List[str]:
     if not raw or not raw.strip():
         return []
     parts = [p.strip() for p in raw.split(",") if p.strip()]
-    cleaned = []
-    for p in parts:
-        if p.isdigit():
-            cleaned.append(p)
-        else:
-            digits = "".join(ch for ch in p if ch.isdigit())
-            if digits:
-                cleaned.append(digits)
-    return cleaned
+    return parts
 
 _ADMIN_IDS_RAW = os.getenv("ADMIN_IDS", "")
 ADMIN_IDS = _parse_admin_ids(_ADMIN_IDS_RAW)
 
+# אם רוצים להכריח ADMIN_IDS, אפשר להפעיל ולידציה נוקשה:
+# אם אין ADMIN_IDS מוגדרים, לא נזרוק שגיאה אוטומטית כאן כדי לא לחסום deploy,
+# אך נוכל להדפיס אזהרה.
 if not ADMIN_IDS:
     print("⚠️ Warning: ADMIN_IDS is empty. Some admin-only commands will be unavailable.", file=sys.stderr)
 
 # ===============================
 # TON / Donations
 # ===============================
-
 TON_WALLET_ADDRESS = os.getenv("TON_WALLET_ADDRESS", "")
 try:
     MIN_DONATION_AMOUNT = float(os.getenv("MIN_DONATION_AMOUNT", "1"))
@@ -74,14 +59,12 @@ except Exception:
 # ===============================
 # תמונות / משאבים
 # ===============================
-
-import os as _os
-START_IMAGES_DIR = _os.path.join(_os.path.dirname(__file__), "..", "media", "start_slides")
+# נתיב יחסי לתיקיית assets (אם קיימת)
+START_IMAGES_DIR = os.path.join(os.path.dirname(__file__), "..", "media", "start_slides")
 
 # ===============================
 # Roles / תפקידים
 # ===============================
-
 ROLE_SUPPORTER = "supporter"
 ROLE_EXPERT = "expert"
 ROLE_ACTIVIST = "activist"
@@ -89,29 +72,16 @@ ROLE_ACTIVIST = "activist"
 # ===============================
 # הגדרות כלליות
 # ===============================
-
 try:
-    MAX_POSITIONS = int(os.getenv("MAX_POSITIONS", "120"))
+    MAX_POSITIONS = int(os.getenv("MAX_POSITIONS", "20"))
 except Exception:
-    MAX_POSITIONS = 120
+    MAX_POSITIONS = 20
 
 DEFAULT_TIMEZONE = os.getenv("DEFAULT_TIMEZONE", "UTC")
 
 # ===============================
-# נקודות ופעולות
-# ===============================
-
-POINTS_FOR_SUPPORTER_REGISTRATION = 10
-POINTS_FOR_EXPERT_APPLICATION = 15
-POINTS_FOR_EXPERT_APPROVAL = 25
-POINTS_FOR_SUPPORTING_EXPERT = 2
-POINTS_FOR_REFERRAL = 5
-POINTS_FOR_DAILY_ACTIVITY = 1
-
-# ===============================
 # Callback Data keys
 # ===============================
-
 # Start carousel
 CALLBACK_START_SLIDE = "start_slide"
 CALLBACK_START_SOCI = "start_soci"
@@ -141,53 +111,34 @@ CALLBACK_ADMIN_QUICK_NAV = "admin_quick_nav"
 # Donations
 CALLBACK_DONATE = "donate"
 CALLBACK_DONATE_CUSTOM = "donate_custom"
+# Donation helper callbacks (copy / info)
 CALLBACK_COPY_WALLET = "copy_wallet"
 CALLBACK_TON_INFO = "ton_info"
 
 # Leaderboard / Expert profile
 CALLBACK_LEADERBOARD = "leaderboard"
-CALLBACK_EXPERT_PROFILE = "expert_profile"  # prefix: expert_profile:<user_id>
-CALLBACK_SUPPORT_EXPERT = "support_expert"  # prefix: support_expert:<user_id>
+CALLBACK_EXPERT_PROFILE = "expert_profile"  # used as prefix: expert_profile:<user_id>
 
 # Help
 CALLBACK_HELP_INFO = "help_info"
 
-# Pagination
+# Pagination prefixes
 CALLBACK_EXPERTS_PAGE = "experts_page"
 CALLBACK_SUPPORTERS_PAGE = "supporters_page"
 
-# Expert admin actions
+# Expert admin actions (patterns handled elsewhere)
 CALLBACK_EXPERT_APPROVE = "expert_approve"
 CALLBACK_EXPERT_REJECT = "expert_reject"
 
-# User profile
-CALLBACK_MY_PROFILE = "my_profile"
-CALLBACK_MY_STATS = "my_stats"
-CALLBACK_MY_REFERRALS = "my_referrals"
-
 # ===============================
-# Media settings
+# Export / Misc
 # ===============================
-
-IMAGE_SIZES = [(320, 180), (640, 360), (960, 540)]
-TEMP_MEDIA_DIR = os.getenv("TEMP_MEDIA_DIR", "/tmp/campaign1_media")
-
-try:
-    MAX_GIF_DURATION_SECONDS = int(os.getenv("MAX_GIF_DURATION_SECONDS", "10"))
-except Exception:
-    MAX_GIF_DURATION_SECONDS = 10
-
-try:
-    MAX_MEDIA_FILESIZE_MB = int(os.getenv("MAX_MEDIA_FILESIZE_MB", "20"))
-except Exception:
-    MAX_MEDIA_FILESIZE_MB = 20
-
+# Default values for other features
 DEFAULT_PAGE_SIZE = int(os.getenv("DEFAULT_PAGE_SIZE", "10"))
 
 # ===============================
 # Export list
 # ===============================
-
 __all__ = [
     "TELEGRAM_BOT_TOKEN",
     "WEBHOOK_URL",
@@ -201,7 +152,6 @@ __all__ = [
     "EXPERTS_GROUP_ID",
     "ACTIVISTS_GROUP_ID",
     "ALL_MEMBERS_GROUP_ID",
-    "WHATSAPP_GROUP_LINK",
     "ADMIN_IDS",
     "TON_WALLET_ADDRESS",
     "MIN_DONATION_AMOUNT",
@@ -211,12 +161,6 @@ __all__ = [
     "ROLE_ACTIVIST",
     "MAX_POSITIONS",
     "DEFAULT_TIMEZONE",
-    "POINTS_FOR_SUPPORTER_REGISTRATION",
-    "POINTS_FOR_EXPERT_APPLICATION",
-    "POINTS_FOR_EXPERT_APPROVAL",
-    "POINTS_FOR_SUPPORTING_EXPERT",
-    "POINTS_FOR_REFERRAL",
-    "POINTS_FOR_DAILY_ACTIVITY",
     "CALLBACK_START_SLIDE",
     "CALLBACK_START_SOCI",
     "CALLBACK_START_FINISH",
@@ -241,18 +185,10 @@ __all__ = [
     "CALLBACK_TON_INFO",
     "CALLBACK_LEADERBOARD",
     "CALLBACK_EXPERT_PROFILE",
-    "CALLBACK_SUPPORT_EXPERT",
     "CALLBACK_HELP_INFO",
     "CALLBACK_EXPERTS_PAGE",
     "CALLBACK_SUPPORTERS_PAGE",
     "CALLBACK_EXPERT_APPROVE",
     "CALLBACK_EXPERT_REJECT",
-    "CALLBACK_MY_PROFILE",
-    "CALLBACK_MY_STATS",
-    "CALLBACK_MY_REFERRALS",
     "DEFAULT_PAGE_SIZE",
-    "IMAGE_SIZES",
-    "TEMP_MEDIA_DIR",
-    "MAX_GIF_DURATION_SECONDS",
-    "MAX_MEDIA_FILESIZE_MB",
 ]

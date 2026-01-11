@@ -1,609 +1,585 @@
-# services/sheets_service.py
+# ===============================
+# services/sheets_service.py - משודרג
+# ===============================
+
 import os
-import time
 import json
-import threading
-from typing import List, Dict, Optional, Any
 from datetime import datetime
-from functools import wraps
+from typing import List, Dict, Optional, Any
+import threading
+from contextlib import contextmanager
 
 import gspread
 from google.oauth2.service_account import Credentials
 
-GOOGLE_SHEETS_SPREADSHEET_ID = os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID", "")
-USERS_SHEET_NAME = os.getenv("USERS_SHEET_NAME", "Telegram Leads")
+# ============================================================
+#  CONFIG
+# ============================================================
+
+SPREADSHEET_ID = os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID")
+USERS_SHEET_NAME = os.getenv("USERS_SHEET_NAME", "Users")
 EXPERTS_SHEET_NAME = os.getenv("EXPERTS_SHEET_NAME", "Experts")
 POSITIONS_SHEET_NAME = os.getenv("POSITIONS_SHEET_NAME", "Positions")
 
-SPREADSHEET_ID = GOOGLE_SHEETS_SPREADSHEET_ID
+GOOGLE_CREDENTIALS_JSON = os.getenv("GOOGLE_CREDENTIALS_JSON")
+if not GOOGLE_CREDENTIALS_JSON:
+    raise Exception("Missing GOOGLE_CREDENTIALS_JSON env variable")
+
+creds_dict = json.loads(GOOGLE_CREDENTIALS_JSON)
+
+SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+credentials = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+gc = gspread.authorize(credentials)
 
 
-def retry(exceptions, tries=3, delay=1.0, backoff=2.0):
-    def deco_retry(f):
-        @wraps(f)
-        def f_retry(*args, **kwargs):
-            mtries, mdelay = tries, delay
-            while mtries > 1:
-                try:
-                    return f(*args, **kwargs)
-                except exceptions:
-                    time.sleep(mdelay)
-                    mtries -= 1
-                    mdelay *= backoff
-            return f(*args, **kwargs)
-        return f_retry
-    return deco_retry
+# ============================================================
+#  LOCKS למניעת race conditions
+# ============================================================
 
-
-_lock = threading.Lock()
-
-
-class SheetsService:
+class SheetLockManager:
     def __init__(self):
-        self._client = None
-        self._spreadsheet = None
-        self.SPREADSHEET_ID = SPREADSHEET_ID
-        self._degraded = False
-
-    def _init_client(self):
-        if self._client and self._spreadsheet:
-            return
+        self._locks = {}
+        self._main_lock = threading.Lock()
+    
+    @contextmanager
+    def lock_sheet(self, sheet_name: str):
+        with self._main_lock:
+            if sheet_name not in self._locks:
+                self._locks[sheet_name] = threading.Lock()
+            sheet_lock = self._locks[sheet_name]
+        
+        sheet_lock.acquire()
         try:
-            creds_json = os.getenv("GOOGLE_CREDENTIALS_JSON", "")
-            if not creds_json:
-                raise Exception("GOOGLE_CREDENTIALS_JSON not set")
-            try:
-                info = json.loads(creds_json)
-            except Exception:
-                with open(creds_json, "r", encoding="utf-8") as fh:
-                    info = json.load(fh)
-            scopes = [
-                "https://www.googleapis.com/auth/spreadsheets",
-                "https://www.googleapis.com/auth/drive",
-            ]
-            credentials = Credentials.from_service_account_info(info, scopes=scopes)
-            self._client = gspread.authorize(credentials)
-            if not self.SPREADSHEET_ID:
-                raise Exception("GOOGLE_SHEETS_SPREADSHEET_ID not set")
-            self._spreadsheet = self._client.open_by_key(self.SPREADSHEET_ID)
-        except Exception as e:
-            print("⚠ Sheets init failed, entering degraded mode:", e)
-            self._degraded = True
-            self._client = None
-            self._spreadsheet = None
+            yield
+        finally:
+            sheet_lock.release()
 
-    def _get_sheet(self, name: str):
-        self._init_client()
-        if not self._spreadsheet:
-            return None
-        try:
-            return self._spreadsheet.worksheet(name)
-        except Exception:
-            return None
+sheet_lock_manager = SheetLockManager()
 
-    @retry(Exception, tries=3, delay=1.0)
-    def create_sheet_if_missing(self, name: str, headers: List[str]):
-        with _lock:
-            sh = self._get_sheet(name)
-            if sh:
-                return sh
-            if not self._spreadsheet:
-                raise Exception("Spreadsheet not available (degraded mode or init failed)")
-            try:
-                sh = self._spreadsheet.add_worksheet(
-                    title=name,
-                    rows="1000",
-                    cols=str(max(20, len(headers))),
-                )
-                sh.append_row(headers)
-                return sh
-            except Exception:
-                sh = self._get_sheet(name)
-                if sh:
-                    return sh
-                raise
 
-    @retry(Exception, tries=3, delay=1.0)
-    def ensure_headers(self, sheet, headers: List[str]):
-        with _lock:
-            current = sheet.row_values(1)
-            if not current:
-                sheet.insert_row(headers, index=1)
-                return
-            missing = [h for h in headers if h not in current]
-            if missing:
-                sheet.resize(rows=sheet.row_count, cols=len(current) + len(missing))
-                for h in missing:
-                    current.append(h)
-                sheet.update("1:1", [current])
+# ============================================================
+#  RETRY DECORATOR
+# ============================================================
 
-    def smart_validate_sheets(self):
-        users_headers = [
-            "user_id",
-            "username",
-            "full_name_telegram",
-            "role",
-            "city",
-            "email",
-            "phone",
-            "referrer",
-            "joined_via_expert_id",
-            "created_at",
-            "whatsapp_link_sent",
-            "points",
-            "level",
-            "verified",
-            "referrals_count",
-            "last_activity",
-            "feedback",
-        ]
-        experts_headers = [
-            "user_id",
-            "expert_full_name",
-            "expert_field",
-            "expert_experience",
-            "expert_position",
-            "expert_links",
-            "expert_why",
-            "created_at",
-            "status",
-            "group_link",
-            "supporters_count",
-            "points",
-            "level",
-            "verified",
-            "referrals_count",
-        ]
-        positions_headers = [
-            "position_id",
-            "title",
-            "description",
-            "expert_user_id",
-            "assigned_at",
-        ]
+import time
+import functools
 
-        users_sheet = self.create_sheet_if_missing(USERS_SHEET_NAME, users_headers)
-        experts_sheet = self.create_sheet_if_missing(EXPERTS_SHEET_NAME, experts_headers)
-        positions_sheet = self.create_sheet_if_missing(POSITIONS_SHEET_NAME, positions_headers)
+def retry_sheets_operation(max_retries=3, base_delay=2.0):
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            last_exception = None
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+                except (gspread.exceptions.APIError, ConnectionError, TimeoutError) as e:
+                    last_exception = e
+                    if attempt == max_retries - 1:
+                        raise
+                    delay = min(base_delay * (2 ** attempt), 30.0)
+                    print(f"⚠️ Retry {attempt + 1}/{max_retries} for {func.__name__} in {delay:.1f}s")
+                    time.sleep(delay)
+            raise last_exception
+        return wrapper
+    return decorator
 
-        self.ensure_headers(users_sheet, users_headers)
-        self.ensure_headers(experts_sheet, experts_headers)
-        self.ensure_headers(positions_sheet, positions_headers)
 
-    def get_users_sheet(self):
-        sh = self._get_sheet(USERS_SHEET_NAME)
-        if not sh and not self._degraded:
-            self.smart_validate_sheets()
-            sh = self._get_sheet(USERS_SHEET_NAME)
-        return sh
+# ============================================================
+#  HELPERS
+# ============================================================
 
-    def get_experts_sheet(self):
-        sh = self._get_sheet(EXPERTS_SHEET_NAME)
-        if not sh and not self._degraded:
-            self.smart_validate_sheets()
-            sh = self._get_sheet(EXPERTS_SHEET_NAME)
-        return sh
+@retry_sheets_operation()
+def _open_sheet(name: str):
+    sh = gc.open_by_key(SPREADSHEET_ID)
+    return sh.worksheet(name)
 
-    def get_positions_sheet(self):
-        sh = self._get_sheet(POSITIONS_SHEET_NAME)
-        if not sh and not self._degraded:
-            self.smart_validate_sheets()
-            sh = self._get_sheet(POSITIONS_SHEET_NAME)
-        return sh
 
-    def get_sheet_info(self, sheet):
-        headers = sheet.row_values(1) or []
-        rows = len(sheet.get_all_values()) - 1
-        cols = len(headers)
-        return {"headers": headers, "rows": rows, "cols": cols}
+def get_users_sheet():
+    return _open_sheet(USERS_SHEET_NAME)
 
-    # ========== Append / update ==========
 
-    @retry(Exception, tries=3, delay=0.5)
-    def append_user(self, user_record: Dict[str, Any]):
-        sheet = self.get_users_sheet()
-        if not sheet:
-            raise Exception("Users sheet not available")
-        headers = sheet.row_values(1)
-        # Ensure all fields exist
-        row = [user_record.get(h, "") for h in headers]
-        with _lock:
-            sheet.append_row(row)
+def get_experts_sheet():
+    return _open_sheet(EXPERTS_SHEET_NAME)
 
-    @retry(Exception, tries=3, delay=0.5)
-    def append_expert(self, expert_record: Dict[str, Any]):
-        sheet = self.get_experts_sheet()
-        if not sheet:
-            raise Exception("Experts sheet not available")
-        headers = sheet.row_values(1)
-        row = [expert_record.get(h, "") for h in headers]
-        with _lock:
-            sheet.append_row(row)
 
-    @retry(Exception, tries=3, delay=0.5)
-    def update_expert_status(self, user_id: str, status: str):
-        sheet = self.get_experts_sheet()
-        if not sheet:
-            return False
-        records = sheet.get_all_records()
-        for idx, r in enumerate(records, start=2):
-            if str(r.get("user_id")) == str(user_id):
-                with _lock:
-                    headers = sheet.row_values(1)
-                    try:
-                        col = headers.index("status") + 1
-                    except ValueError:
-                        headers.append("status")
-                        sheet.update("1:1", [headers])
-                        col = headers.index("status") + 1
-                    sheet.update_cell(idx, col, status)
-                return True
-        return False
+def get_positions_sheet():
+    return _open_sheet(POSITIONS_SHEET_NAME)
 
-    @retry(Exception, tries=3, delay=0.5)
-    def mark_whatsapp_sent(self, user_id: str):
-        """Mark that WhatsApp link was sent to user"""
-        sheet = self.get_users_sheet()
-        if not sheet:
-            return False
-        records = sheet.get_all_records()
+
+# ============================================================
+#  USERS
+# ============================================================
+
+@retry_sheets_operation()
+def append_user_row(row: Dict[str, Any]):
+    with sheet_lock_manager.lock_sheet("Users"):
+        sheet = get_users_sheet()
         headers = sheet.row_values(1)
         
-        # Ensure whatsapp_link_sent column exists
-        if "whatsapp_link_sent" not in headers:
-            headers.append("whatsapp_link_sent")
-            sheet.update("1:1", [headers])
-            
-        col_idx = headers.index("whatsapp_link_sent") + 1
+        for key in row.keys():
+            if key not in headers:
+                headers.append(key)
+        sheet.update("1:1", [headers])
         
-        for idx, r in enumerate(records, start=2):
-            if str(r.get("user_id")) == str(user_id):
-                with _lock:
-                    sheet.update_cell(idx, col_idx, "TRUE")
-                return True
-        return False
+        values = [row.get(h, "") for h in headers]
+        sheet.append_row(values)
 
-    @retry(Exception, tries=3, delay=0.5)
-    def update_user_last_activity(self, user_id: str):
-        """Update last activity timestamp for user"""
-        sheet = self.get_users_sheet()
-        if not sheet:
-            return False
-        records = sheet.get_all_records()
-        headers = sheet.row_values(1)
-        
-        # Ensure last_activity column exists
-        if "last_activity" not in headers:
-            headers.append("last_activity")
-            sheet.update("1:1", [headers])
-            
-        col_idx = headers.index("last_activity") + 1
-        
-        for idx, r in enumerate(records, start=2):
-            if str(r.get("user_id")) == str(user_id):
-                with _lock:
-                    sheet.update_cell(idx, col_idx, datetime.utcnow().isoformat())
-                return True
-        return False
 
-    # ========== Queries ==========
+@retry_sheets_operation()
+def get_supporter_by_id(user_id: str) -> Optional[Dict]:
+    sheet = get_users_sheet()
+    rows = sheet.get_all_records()
+    for row in rows:
+        if str(row.get("user_id")) == str(user_id):
+            return row
+    return None
 
-    def get_expert_by_id(self, user_id: str) -> Optional[Dict[str, Any]]:
-        sheet = self.get_experts_sheet()
-        if not sheet:
-            return None
+
+@retry_sheets_operation()
+def clear_user_duplicates() -> int:
+    with sheet_lock_manager.lock_sheet("Users"):
+        sheet = get_users_sheet()
         rows = sheet.get_all_records()
-        for r in rows:
-            if str(r.get("user_id")) == str(user_id):
-                return r
-        return None
-
-    def get_supporter_by_id(self, user_id: str) -> Optional[Dict[str, Any]]:
-        sheet = self.get_users_sheet()
-        if not sheet:
-            return None
-        rows = sheet.get_all_records()
-        for r in rows:
-            if str(r.get("user_id")) == str(user_id):
-                return r
-        return None
-
-    def is_user_registered(self, user_id: str) -> bool:
-        """Check if user is registered as supporter"""
-        return self.get_supporter_by_id(user_id) is not None
-
-    def get_whatsapp_sent_status(self, user_id: str) -> bool:
-        """Check if WhatsApp link was sent to user"""
-        user = self.get_supporter_by_id(user_id)
-        if not user:
-            return False
-        return str(user.get("whatsapp_link_sent", "")).upper() == "TRUE"
-
-    @retry(Exception, tries=3, delay=0.5)
-    def get_positions(self) -> List[Dict[str, Any]]:
-        sheet = self.get_positions_sheet()
-        if not sheet:
-            return []
-        return sheet.get_all_records()
-
-    def get_position(self, position_id: str) -> Optional[Dict[str, Any]]:
-        sheet = self.get_positions_sheet()
-        if not sheet:
-            return None
-        rows = sheet.get_all_records()
-        for r in rows:
-            if str(r.get("position_id")) == str(position_id):
-                return r
-        return None
-
-    def position_is_free(self, position_id: str) -> bool:
-        pos = self.get_position(position_id)
-        if not pos:
-            return True
-        return not bool(pos.get("expert_user_id"))
-
-    # ========== Positions ==========
-
-    @retry(Exception, tries=3, delay=0.5)
-    def assign_position(self, position_id: str, user_id: str, timestamp: Optional[str] = None):
-        sheet = self.get_positions_sheet()
-        if not sheet:
-            raise Exception("Positions sheet not available")
-        rows = sheet.get_all_records()
-        headers = sheet.row_values(1)
-        for idx, r in enumerate(rows, start=2):
-            if str(r.get("position_id")) == str(position_id):
-                col_user = headers.index("expert_user_id") + 1 if "expert_user_id" in headers else None
-                col_assigned = headers.index("assigned_at") + 1 if "assigned_at" in headers else None
-                with _lock:
-                    if col_user:
-                        sheet.update_cell(idx, col_user, str(user_id))
-                    if col_assigned:
-                        sheet.update_cell(idx, col_assigned, timestamp or datetime.utcnow().isoformat())
-                return True
-        with _lock:
-            row = [position_id] + [""] * (len(headers) - 1)
-            sheet.append_row(row)
-            self.assign_position(position_id, user_id, timestamp)
-        return True
-
-    @retry(Exception, tries=3, delay=0.5)
-    def reset_position(self, position_id: str):
-        sheet = self.get_positions_sheet()
-        if not sheet:
-            return False
-        rows = sheet.get_all_records()
-        headers = sheet.row_values(1)
-        for idx, r in enumerate(rows, start=2):
-            if str(r.get("position_id")) == str(position_id):
-                with _lock:
-                    if "expert_user_id" in headers:
-                        sheet.update_cell(idx, headers.index("expert_user_id") + 1, "")
-                    if "assigned_at" in headers:
-                        sheet.update_cell(idx, headers.index("assigned_at") + 1, "")
-                return True
-        return False
-
-    @retry(Exception, tries=3, delay=0.5)
-    def reset_all_positions(self):
-        sheet = self.get_positions_sheet()
-        if not sheet:
-            return False
-        headers = sheet.row_values(1)
-        rows = sheet.get_all_records()
-        with _lock:
-            for idx, _ in enumerate(rows, start=2):
-                if "expert_user_id" in headers:
-                    sheet.update_cell(idx, headers.index("expert_user_id") + 1, "")
-                if "assigned_at" in headers:
-                    sheet.update_cell(idx, headers.index("assigned_at") + 1, "")
-        return True
-
-    # ========== Duplicates / leaderboard ==========
-
-    @retry(Exception, tries=3, delay=0.5)
-    def clear_user_duplicates(self) -> int:
-        sheet = self.get_users_sheet()
-        if not sheet:
+        if not rows:
             return 0
-        rows = sheet.get_all_records()
-        seen = set()
-        deleted = 0
-        with _lock:
-            for idx, r in reversed(list(enumerate(rows, start=2))):
-                uid = str(r.get("user_id"))
-                if uid in seen:
-                    sheet.delete_rows(idx)
-                    deleted += 1
-                else:
-                    seen.add(uid)
-        return deleted
 
-    @retry(Exception, tries=3, delay=0.5)
-    def clear_expert_duplicates(self) -> int:
-        sheet = self.get_experts_sheet()
-        if not sheet:
-            return 0
-        rows = sheet.get_all_records()
-        seen = set()
-        deleted = 0
-        with _lock:
-            for idx, r in reversed(list(enumerate(rows, start=2))):
-                uid = str(r.get("user_id"))
-                if uid in seen:
-                    sheet.delete_rows(idx)
-                    deleted += 1
-                else:
-                    seen.add(uid)
-        return deleted
+        user_rows: Dict[str, int] = {}
+        created_map: Dict[str, datetime] = {}
+        to_delete_indices: List[int] = []
 
-    def get_experts_leaderboard(self) -> List[Dict[str, Any]]:
-        sheet = self.get_experts_sheet()
-        if not sheet:
-            return []
-        rows = sheet.get_all_records()
+        for idx, row in enumerate(rows, start=2):
+            uid = str(row.get("user_id", "")).strip()
+            if not uid:
+                continue
 
-        def safe_int(x):
+            created_str = str(row.get("created_at", "")).strip()
             try:
-                return int(x)
+                created_dt = datetime.fromisoformat(created_str)
             except Exception:
-                return 0
+                created_dt = datetime.min
 
-        sorted_rows = sorted(
-            rows,
-            key=lambda r: safe_int(r.get("supporters_count", 0)),
-            reverse=True,
-        )
-        return sorted_rows
+            if uid not in created_map or created_dt >= created_map[uid]:
+                if uid in user_rows:
+                    to_delete_indices.append(user_rows[uid])
+                created_map[uid] = created_dt
+                user_rows[uid] = idx
+            else:
+                to_delete_indices.append(idx)
 
-    # ========== Helper/compat methods used ע"י flows/admin ==========
+        to_delete_indices = sorted(set(to_delete_indices), reverse=True)
+        for idx in to_delete_indices:
+            sheet.delete_rows(idx)
 
-    def get_expert_status(self, user_id: str) -> Optional[str]:
-        expert = self.get_expert_by_id(user_id)
-        if not expert:
-            return None
-        return expert.get("status")
+        return len(to_delete_indices)
 
-    def get_expert_position(self, user_id: str) -> Optional[str]:
-        expert = self.get_expert_by_id(user_id)
-        if not expert:
-            return None
-        return expert.get("expert_position")
 
-    def get_expert_group_link(self, user_id: str) -> Optional[str]:
-        expert = self.get_expert_by_id(user_id)
-        if not expert:
-            return None
-        return expert.get("group_link")
+# ============================================================
+#  EXPERTS
+# ============================================================
 
-    @retry(Exception, tries=3, delay=0.5)
-    def increment_expert_supporters(self, user_id: str, step: int = 1):
-        sheet = self.get_experts_sheet()
-        if not sheet:
-            return False
+@retry_sheets_operation()
+def append_expert_row(row: Dict[str, Any]):
+    with sheet_lock_manager.lock_sheet("Experts"):
+        sheet = get_experts_sheet()
+        headers = sheet.row_values(1)
+
+        expected_headers = [
+            "user_id", "expert_full_name", "expert_field", "expert_experience",
+            "expert_position", "expert_links", "expert_why",
+            "created_at", "status", "group_link", "supporters_count"
+        ]
+
+        for h in expected_headers:
+            if h not in headers:
+                headers.append(h)
+
+        sheet.update("1:1", [headers])
+
+        base_row = {
+            "user_id": row.get("user_id", ""),
+            "expert_full_name": row.get("expert_full_name", ""),
+            "expert_field": row.get("expert_field", ""),
+            "expert_experience": row.get("expert_experience", ""),
+            "expert_position": row.get("expert_position", ""),
+            "expert_links": row.get("expert_links", ""),
+            "expert_why": row.get("expert_why", ""),
+            "created_at": row.get("created_at", ""),
+            "status": row.get("status", "pending"),
+            "group_link": row.get("group_link", ""),
+            "supporters_count": row.get("supporters_count", 0),
+        }
+
+        values = [base_row.get(h, "") for h in headers]
+        sheet.append_row(values)
+
+
+@retry_sheets_operation()
+def get_expert_by_id(user_id: str) -> Optional[Dict]:
+    sheet = get_experts_sheet()
+    rows = sheet.get_all_records()
+    for row in rows:
+        if str(row.get("user_id")) == str(user_id):
+            return row
+    return None
+
+
+@retry_sheets_operation()
+def get_expert_status(user_id: str) -> Optional[str]:
+    expert = get_expert_by_id(user_id)
+    if not expert:
+        return None
+    return expert.get("status")
+
+
+@retry_sheets_operation()
+def update_expert_status(user_id: str, status: str):
+    with sheet_lock_manager.lock_sheet("Experts"):
+        sheet = get_experts_sheet()
         rows = sheet.get_all_records()
         headers = sheet.row_values(1)
+        
+        # מציאת אינדקס עמודת status
         try:
-            col_idx = headers.index("supporters_count") + 1
+            status_col = headers.index("status") + 1
         except ValueError:
+            status_col = 9
+        
+        for idx, row in enumerate(rows, start=2):
+            if str(row.get("user_id")) == str(user_id):
+                sheet.update_cell(idx, status_col, status)
+                return
+
+
+@retry_sheets_operation()
+def get_expert_position(user_id: str) -> Optional[str]:
+    expert = get_expert_by_id(user_id)
+    if not expert:
+        return None
+    return expert.get("expert_position")
+
+
+@retry_sheets_operation()
+def get_expert_group_link(user_id: str) -> Optional[str]:
+    expert = get_expert_by_id(user_id)
+    if not expert:
+        return None
+    return expert.get("group_link")
+
+
+@retry_sheets_operation()
+def update_expert_group_link(user_id: str, link: str):
+    with sheet_lock_manager.lock_sheet("Experts"):
+        sheet = get_experts_sheet()
+        rows = sheet.get_all_records()
+        headers = sheet.row_values(1)
+        
+        try:
+            group_link_col = headers.index("group_link") + 1
+        except ValueError:
+            group_link_col = 10
+        
+        for idx, row in enumerate(rows, start=2):
+            if str(row.get("user_id")) == str(user_id):
+                sheet.update_cell(idx, group_link_col, link)
+                return
+
+
+@retry_sheets_operation()
+def increment_expert_supporters(expert_user_id: str):
+    """
+    הגדלת מונה התומכים של מומחה
+    """
+    with sheet_lock_manager.lock_sheet("Experts"):
+        sheet = get_experts_sheet()
+        rows = sheet.get_all_records()
+        headers = sheet.row_values(1)
+        
+        try:
+            count_col = headers.index("supporters_count") + 1
+        except ValueError:
+            # אם העמודה לא קיימת, נוסיף אותה
             headers.append("supporters_count")
             sheet.update("1:1", [headers])
-            col_idx = headers.index("supporters_count") + 1
-
-        def safe_int(x):
-            try:
-                return int(x)
-            except Exception:
-                return 0
-
-        with _lock:
-            for idx, r in enumerate(rows, start=2):
-                if str(r.get("user_id")) == str(user_id):
-                    current = safe_int(r.get("supporters_count", 0))
-                    sheet.update_cell(idx, col_idx, current + step)
-                    return True
-        return False
-
-    def auto_fix_all_sheets(self):
-        self.smart_validate_sheets()
-
-    def validate_all_sheets(self):
-        self.smart_validate_sheets()
+            count_col = len(headers)
+        
+        for idx, row in enumerate(rows, start=2):
+            if str(row.get("user_id")) == str(expert_user_id):
+                current = int(row.get("supporters_count", 0) or 0)
+                sheet.update_cell(idx, count_col, current + 1)
+                return
 
 
-sheets_service = SheetsService()
+@retry_sheets_operation()
+def get_experts_leaderboard() -> List[Dict]:
+    """
+    קבלת טבלת מובילים של מומחים
+    """
+    sheet = get_experts_sheet()
+    rows = sheet.get_all_records()
+    
+    # סינון רק מומחים מאושרים
+    approved = [r for r in rows if r.get("status") == "approved"]
+    
+    # מיון לפי מספר תומכים (יורד)
+    sorted_experts = sorted(
+        approved,
+        key=lambda x: int(x.get("supporters_count", 0) or 0),
+        reverse=True
+    )
+    
+    return sorted_experts[:20]  # 20 הראשונים
 
-# ===============================
-# Compatibility aliases ברמת המודול
-# ===============================
 
-def append_user(user_record: Dict[str, Any]):
-    return sheets_service.append_user(user_record)
+@retry_sheets_operation()
+def get_experts_pending() -> List[Dict]:
+    sheet = get_experts_sheet()
+    rows = sheet.get_all_records()
+    return [row for row in rows if row.get("status") == "pending"]
 
-def append_expert(expert_record: Dict[str, Any]):
-    return sheets_service.append_expert(expert_record)
 
-def append_user_row(user_record: Dict[str, Any]):
-    return sheets_service.append_user(user_record)
-
-def append_expert_row(expert_record: Dict[str, Any]):
-    return sheets_service.append_expert(expert_record)
-
-def get_supporter_by_id(user_id: str) -> Optional[Dict[str, Any]]:
-    return sheets_service.get_supporter_by_id(user_id)
-
-def get_expert_by_id(user_id: str) -> Optional[Dict[str, Any]]:
-    return sheets_service.get_expert_by_id(user_id)
-
-def get_expert_status(user_id: str) -> Optional[str]:
-    return sheets_service.get_expert_status(user_id)
-
-def get_expert_position(user_id: str) -> Optional[str]:
-    return sheets_service.get_expert_position(user_id)
-
-def get_expert_group_link(user_id: str) -> Optional[str]:
-    return sheets_service.get_expert_group_link(user_id)
-
-def get_experts_leaderboard() -> List[Dict[str, Any]]:
-    return sheets_service.get_experts_leaderboard()
-
-def get_positions() -> List[Dict[str, Any]]:
-    return sheets_service.get_positions()
-
-def get_position(position_id: str) -> Optional[Dict[str, Any]]:
-    return sheets_service.get_position(position_id)
-
-def increment_expert_supporters(user_id: str, step: int = 1):
-    return sheets_service.increment_expert_supporters(user_id, step=step)
-
-def clear_user_duplicates() -> int:
-    return sheets_service.clear_user_duplicates()
-
+@retry_sheets_operation()
 def clear_expert_duplicates() -> int:
-    return sheets_service.clear_expert_duplicates()
+    with sheet_lock_manager.lock_sheet("Experts"):
+        sheet = get_experts_sheet()
+        rows = sheet.get_all_records()
+        if not rows:
+            return 0
 
-def auto_fix_all_sheets():
-    return sheets_service.auto_fix_all_sheets()
+        user_rows: Dict[str, int] = {}
+        created_map: Dict[str, datetime] = {}
+        to_delete_indices: List[int] = []
+
+        for idx, row in enumerate(rows, start=2):
+            uid = str(row.get("user_id", "")).strip()
+            if not uid:
+                continue
+
+            created_str = str(row.get("created_at", "")).strip()
+            try:
+                created_dt = datetime.fromisoformat(created_str)
+            except Exception:
+                created_dt = datetime.min
+
+            if uid not in created_map or created_dt >= created_map[uid]:
+                if uid in user_rows:
+                    to_delete_indices.append(user_rows[uid])
+                created_map[uid] = created_dt
+                user_rows[uid] = idx
+            else:
+                to_delete_indices.append(idx)
+
+        to_delete_indices = sorted(set(to_delete_indices), reverse=True)
+        for idx in to_delete_indices:
+            sheet.delete_rows(idx)
+
+        return len(to_delete_indices)
+
+
+# ============================================================
+#  POSITIONS
+# ============================================================
+
+@retry_sheets_operation()
+def get_positions() -> List[Dict]:
+    sheet = get_positions_sheet()
+    return sheet.get_all_records()
+
+
+@retry_sheets_operation()
+def get_position(position_id: str) -> Optional[Dict]:
+    sheet = get_positions_sheet()
+    rows = sheet.get_all_records()
+    for row in rows:
+        if str(row.get("position_id")) == str(position_id):
+            return row
+    return None
+
+
+@retry_sheets_operation()
+def position_is_free(position_id: str) -> bool:
+    pos = get_position(position_id)
+    if not pos:
+        return False
+    expert_id = str(pos.get("expert_user_id", "")).strip()
+    return expert_id == ""
+
+
+@retry_sheets_operation()
+def assign_position(position_id: str, user_id: str, timestamp: str):
+    with sheet_lock_manager.lock_sheet("Positions"):
+        sheet = get_positions_sheet()
+        rows = sheet.get_all_records()
+        for idx, row in enumerate(rows, start=2):
+            if str(row.get("position_id")) == str(position_id):
+                sheet.update(f"D{idx}:E{idx}", [[user_id, timestamp]])
+                return
+        raise ValueError("Position not found")
+
+
+@retry_sheets_operation()
+def reset_position(position_id: str):
+    with sheet_lock_manager.lock_sheet("Positions"):
+        sheet = get_positions_sheet()
+        rows = sheet.get_all_records()
+        for idx, row in enumerate(rows, start=2):
+            if str(row.get("position_id")) == str(position_id):
+                sheet.update(f"D{idx}:E{idx}", [["", ""]])
+                return
+        raise ValueError("Position not found")
+
+
+@retry_sheets_operation()
+def reset_all_positions():
+    with sheet_lock_manager.lock_sheet("Positions"):
+        sheet = get_positions_sheet()
+        rows = sheet.get_all_records()
+        if not rows:
+            return
+        updates = [["", ""] for _ in rows]
+        sheet.update(f"D2:E{len(rows)+1}", updates)
+
+
+# ============================================================
+#  SHEET INFO / VALIDATION (ללא שינוי)
+# ============================================================
+
+def get_sheet_info(sheet) -> Dict:
+    headers = sheet.row_values(1)
+    all_values = sheet.get_all_values()
+    rows_count = len(all_values)
+    cols_count = max((len(r) for r in all_values), default=0)
+
+    return {
+        "title": sheet.title,
+        "headers": headers,
+        "rows": rows_count,
+        "cols": cols_count,
+    }
+
+
+def validate_headers(sheet, expected_headers):
+    headers = sheet.row_values(1)
+
+    if len(headers) != len(set(headers)):
+        raise ValueError(f"Duplicate headers found in sheet '{sheet.title}'")
+
+    missing = [h for h in expected_headers if h not in headers]
+    if missing:
+        raise ValueError(
+            f"Missing required headers in sheet '{sheet.title}': {missing}"
+        )
+
+    return True
+
 
 def validate_all_sheets():
-    return sheets_service.validate_all_sheets()
+    users_sheet = get_users_sheet()
+    experts_sheet = get_experts_sheet()
+    positions_sheet = get_positions_sheet()
 
-def is_user_registered(user_id: str) -> bool:
-    return sheets_service.is_user_registered(user_id)
+    expected_users = [
+        "user_id", "username", "full_name_telegram", "role",
+        "city", "email", "referrer", "joined_via_expert_id", "created_at"
+    ]
 
-def mark_whatsapp_sent(user_id: str):
-    return sheets_service.mark_whatsapp_sent(user_id)
+    expected_experts = [
+        "user_id", "expert_full_name", "expert_field", "expert_experience",
+        "expert_position", "expert_links", "expert_why",
+        "created_at", "status", "group_link"
+    ]
 
-def get_whatsapp_sent_status(user_id: str) -> bool:
-    return sheets_service.get_whatsapp_sent_status(user_id)
+    expected_positions = [
+        "position_id", "title", "description",
+        "expert_user_id", "assigned_at"
+    ]
 
-def update_user_last_activity(user_id: str):
-    return sheets_service.update_user_last_activity(user_id)
+    validate_headers(users_sheet, expected_users)
+    validate_headers(experts_sheet, expected_experts)
+    validate_headers(positions_sheet, expected_positions)
+
+    print("✔ All sheets validated successfully")
 
 
-__all__ = [
-    "SPREADSHEET_ID",
-    "sheets_service",
-    "append_user",
-    "append_expert",
-    "append_user_row",
-    "append_expert_row",
-    "get_supporter_by_id",
-    "get_expert_by_id",
-    "get_expert_status",
-    "get_expert_position",
-    "get_expert_group_link",
-    "get_experts_leaderboard",
-    "get_positions",
-    "get_position",
-    "increment_expert_supporters",
-    "clear_user_duplicates",
-    "clear_expert_duplicates",
-    "auto_fix_all_sheets",
-    "validate_all_sheets",
-    "smart_validate_sheets",
-    "is_user_registered",
-    "mark_whatsapp_sent",
-    "get_whatsapp_sent_status",
-    "update_user_last_activity",
-]
+def auto_fix_headers(sheet, expected_headers):
+    headers = sheet.row_values(1)
+    fixed = []
+    seen = set()
+
+    for h in headers:
+        original = h.strip()
+        if original == "":
+            original = f"unnamed_{len(fixed)+1}"
+
+        new_h = original
+        counter = 2
+        while new_h in seen:
+            new_h = f"{original}_{counter}"
+            counter += 1
+
+        fixed.append(new_h)
+        seen.add(new_h)
+
+    for h in expected_headers:
+        if h not in fixed:
+            fixed.append(h)
+
+    sheet.update("1:1", [fixed])
+    print(f"✔ Auto-fixed headers for sheet '{sheet.title}'")
+    return fixed
+
+
+def auto_fix_all_sheets():
+    users_sheet = get_users_sheet()
+    experts_sheet = get_experts_sheet()
+    positions_sheet = get_positions_sheet()
+
+    expected_users = [
+        "user_id", "username", "full_name_telegram", "role",
+        "city", "email", "referrer", "joined_via_expert_id", "created_at"
+    ]
+
+    expected_experts = [
+        "user_id", "expert_full_name", "expert_field", "expert_experience",
+        "expert_position", "expert_links", "expert_why",
+        "created_at", "status", "group_link", "supporters_count"
+    ]
+
+    expected_positions = [
+        "position_id", "title", "description",
+        "expert_user_id", "assigned_at"
+    ]
+
+    auto_fix_headers(users_sheet, expected_users)
+    auto_fix_headers(experts_sheet, expected_experts)
+    auto_fix_headers(positions_sheet, expected_positions)
+
+    print("✔ All sheets auto-fixed successfully")
+
+
+def smart_validate_sheets():
+    print("🔍 Running Smart Validation...")
+
+    try:
+        validate_all_sheets()
+        print("✔ Sheets valid on first check")
+        return
+    except Exception as e:
+        print(f"⚠ Validation failed on first attempt: {e}")
+        print("🔧 Attempting auto-fix...")
+
+        try:
+            auto_fix_all_sheets()
+        except Exception as fix_err:
+            print(f"❌ Auto-fix failed: {fix_err}")
+            raise Exception("Auto-fix failed, cannot continue")
+
+    try:
+        validate_all_sheets()
+        print("✔ Sheets valid after auto-fix")
+        return
+    except Exception as e:
+        print(f"❌ Validation failed even after auto-fix: {e}")
+        raise Exception(
+            "Critical sheet structure error — cannot auto-fix. "
+            "Please fix the sheet manually."
+        )

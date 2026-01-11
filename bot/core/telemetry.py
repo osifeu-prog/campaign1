@@ -1,5 +1,8 @@
-# bot/core/telemetry.py
-# Telemetry – A/B Testing + Event Tracking
+# ===============================
+# telemetry – Analytics + A/B Testing Hooks
+# ===============================
+
+from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
@@ -10,6 +13,7 @@ from telegram import User
 from telegram.ext import ContextTypes
 
 from services.logger_service import log
+
 
 Variant = Literal["A", "B"]
 
@@ -47,7 +51,6 @@ class Telemetry:
         props = properties.copy() if properties else {}
         props["event_name"] = event_name
         props["timestamp"] = datetime.utcnow().isoformat()
-
         await log(
             context,
             f"Telemetry event: {event_name}",

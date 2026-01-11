@@ -1,9 +1,9 @@
-# bot/core/locale_service.py
 # ===============================
-# locale_service – תמיכה בשפות (כרגע: עברית + אנגלית בסיסית)
+# locale_service – תמיכה בשפות (כרגע: עברית)
 # ===============================
 
 from typing import Literal
+
 
 LanguageCode = Literal["he", "en"]
 
@@ -34,21 +34,9 @@ class LocaleService:
             ),
         }
 
-        en = {
-            "start_intro": (
-                "Welcome to the Unity Movement.\n\n"
-                "This bot helps you join, register as a supporter, or apply as an expert.\n\n"
-                "How would you like to join?"
-            ),
-            "unknown_command": (
-                "Unknown command.\n"
-                "Try /menu to see available options."
-            ),
-        }
-
         if lang == "he":
             return he.get(key, key)
-        return en.get(key, key)
+        return he.get(key, key)
 
 
 locale_service = LocaleService()

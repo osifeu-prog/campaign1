@@ -1,5 +1,8 @@
-# bot/core/session_manager.py
-# ניהול סשנים ו־State Machine בסיסי
+# ===============================
+# session_manager – ניהול סשנים ו־State Machine בסיסי
+# ===============================
+
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
