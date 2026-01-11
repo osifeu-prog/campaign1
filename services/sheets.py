@@ -7,6 +7,12 @@ from config.settings import (
     GOOGLE_SHEETS_SPREADSHEET_ID,
 )
 
+if not GOOGLE_CREDENTIALS_JSON:
+    raise RuntimeError("GOOGLE_CREDENTIALS_JSON is not set")
+
+if not GOOGLE_SHEETS_SPREADSHEET_ID:
+    raise RuntimeError("GOOGLE_SHEETS_SPREADSHEET_ID is not set")
+
 _SCOPE = [
     "https://spreadsheets.google.com/feeds",
     "https://www.googleapis.com/auth/drive",
