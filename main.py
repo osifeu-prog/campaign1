@@ -1,3 +1,4 @@
+
 from fastapi import FastAPI, Request
 from telegram import Update
 from telegram.ext import CommandHandler
@@ -12,7 +13,6 @@ from services.logger import logger
 
 app = FastAPI()
 tg_app = build_application()
-
 tg_app.add_handler(CommandHandler("start", start))
 tg_app.add_handler(CommandHandler("help", help_cmd))
 tg_app.add_handler(CommandHandler("register", register))
